@@ -1,0 +1,361 @@
+init_hook pid: 23786
+[1] INIT HOOK called from ./build/libcuda.so.1 (base: 0x7fa736104000)
+Initializing CUDA Driver API Hook...
+CUDA Driver API Hook initialized, Page Size: 2.00 MB
+Initializing shared memory...
+Attached to existing shared memory
+Shared memory initialized at 0x7fa73404a000
+Initializing ipc...
+ipc initialized
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemAlloc
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemFree
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemFreeHost
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemAlloc
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemFree
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemFreeHost
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:06] cuGetProcAddress called for: cuMemcpyHtoDAsync
+Initializing userfault...
+userfault_fd 40
+userfault initialized
+[2025-07-29 22:32:06] cuMemAlloc(dptr=0x60a0048, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x70e9b58, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x65155c8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x666c4c8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x6855dc8, size=20.00 MB, aligned_size=20.00 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa683400000, src=0x7fa6d6b5c040, size=2.25 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa683400000, src=0x7fa6d6b5c040, size=2.00 MB, hash=10d3c0aa1d627db7f05ded82019400c8350cb9567d79b0b62eedc60c1fcc71b9, found=0)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa683640000, src=0x7fa6d6d9d040, size=2.00 MB)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x685a9c8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa683840000, src=0x7fa6d6719040, size=2.25 MB)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x68e6cc8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa683a80000, src=0x7fa6d21fb040, size=2.25 MB)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x68ef408, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa683cc0000, src=0x7fa6d1db8040, size=2.25 MB)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x68f7b48, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa683f00000, src=0x7fa6cf8f9040, size=2.25 MB)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x6900288, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa684140000, src=0x7fa6b3e35040, size=2.25 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa684380000, src=0x7fa6b3433040, size=2.00 MB)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x6919048, size=20.00 MB, aligned_size=20.00 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa685200000, src=0x7fa6b2b32040, size=9.00 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa685200000, src=0x7fa6b2b32040, size=2.00 MB, hash=287cf6ab15a0595fa9f40102d0194028a448574132d2635211d5d5eac2680d85, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa685400000, src=0x7fa6b2d32040, size=2.00 MB, hash=3f737c0e17c82272075d1ed173688fc04306208415ba43d7014d630761e4df02, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa685600000, src=0x7fa6b2f32040, size=2.00 MB, hash=07979eba68b7aa9dbdd559893071563fae09f3045ad1a85fc3c3c32b13b13d28, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa685800000, src=0x7fa6b3132040, size=2.00 MB, hash=50dc50fb10ea86282a460174b51fca1d5a0e71b42ea89a8b95db4467c9aeade0, found=0)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa685b00000, src=0x7fa6b2731040, size=4.00 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa685c00000, src=0x7fa6b2831040, size=2.00 MB, hash=69d87a1cb65251e7a5233f736dd5e91bcd1780109fb2cfecded61a18d888c100, found=0)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x6924888, size=20.00 MB, aligned_size=20.00 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa686600000, src=0x7fa6b3634040, size=8.00 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa686600000, src=0x7fa6b3634040, size=2.00 MB, hash=1df4b7c04f2bd60353d42eeff5f240818cbe8e1fe40937a5bce979b40666597c, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa686800000, src=0x7fa6b3834040, size=2.00 MB, hash=803a3e5616772d53c84c2b4e665598ae4232753ebc519bdce561f6b6b4c2eff8, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa686a00000, src=0x7fa6b3a34040, size=2.00 MB, hash=1c92e408240efcedefe9b0d5ab3e7b4fe12b1bf3e4bada11ecc7359126f94f59, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa686c00000, src=0x7fa6b3c34040, size=2.00 MB, hash=a8030af7b78bed865e26543cede5eebad8419cbdf76b8a0a79edeecd22ec023e, found=0)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa685f00000, src=0x7fa6b2330040, size=4.00 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa686000000, src=0x7fa6b2430040, size=2.00 MB, hash=818ceb3815e35cae75f658e281f27a8527f15fa54d1692cf02ad8f0940c3d969, found=0)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa686e00000, src=0x7fa6b1a2f040, size=9.00 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa686e00000, src=0x7fa6b1a2f040, size=2.00 MB, hash=46d222bd35e36ad9dfaae546603d69c429473905e2cd000f5a65eb2fc61b4cb4, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa687000000, src=0x7fa6b1c2f040, size=2.00 MB, hash=25a1f81cc3511d115a575bd5c3b5f82dc50e43abbd88dfa21bcd38a8061dede4, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa687200000, src=0x7fa6b1e2f040, size=2.00 MB, hash=86ff097bb9039ce9944934bd3296e9bc50bd1d63a2e5d6dc8e1557bea7d66e9a, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa687400000, src=0x7fa6b202f040, size=2.00 MB, hash=8270baa0c3101990e1d73d23049bf61185924bf9009d34eeef17524be3e66459, found=0)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x692a388, size=20.00 MB, aligned_size=20.00 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa687a00000, src=0x7fa6b162e040, size=4.00 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa687a00000, src=0x7fa6b162e040, size=2.00 MB, hash=d25ea1ac304cab00fb772d9149ec4f314e446de1944f665c711c838c45dc95a1, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa687c00000, src=0x7fa6b182e040, size=2.00 MB, hash=64303e5f928651edd46ff7de17b718e2c83562d19963d639e15bdc2ed870290c, found=0)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa687e00000, src=0x7fa6b122d040, size=4.00 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa687e00000, src=0x7fa6b122d040, size=2.00 MB, hash=6534fdc27f0f31578e8f4429dd9265cc7ecefb1e8aab986c44cf32a4b068b155, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa688000000, src=0x7fa6b142d040, size=2.00 MB, hash=93d5ae0c3dd1fda04a886f184d02a68de9a87c33fee1908e82adc54e5f8d21e5, found=0)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa688200000, src=0x7fa6b092c040, size=9.00 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa688200000, src=0x7fa6b092c040, size=2.00 MB, hash=070dac011b013c0e794a82031a2db6b43f5eb272a2716987738d32ae6b2a196c, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa688400000, src=0x7fa6b0b2c040, size=2.00 MB, hash=9cfb510dcbce20cc9f629d779c1d3aa14a5f41ce7af1c50287c36236ccd8669c, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(vaYou need to install the package nvidia-ml-py3 (f.i with "pip3 install nvidia-ml-py3") to show gpu temperature and fan speed.
+
+OS: Linux, 4.15.0-206-generic
+Device-name: VM-0-2-ubuntu
+1 GPU(s) used for benchmark:
+0: Tesla V100-SXM2-32GB
+Available GPUs on device: 1
+Cuda-version: 11.7
+Cudnn-version: 8500
+Python-version: 3.7.5
+PyTorch-version: 1.13.1+cu117
+CPU: Intel(R) Xeon(R) Platinum 8255C CPU @ 2.50GHz
+Model: resnet50
+Global train batch size: 64
+Local train batch size: 64
+Global evaluation batch size: 64
+Local evaluation batch size: 64
+Distribution Mode: Single GPU Training 
+Process group backend: nccl
+Optimizer: SGD
+Precision: float
+Compile-Mode: False
+Log file: 1_TeslaV100-SXM2-32GB_resnet50_64_lr0001.txt
+Training data: Synthetic data
+Initial learning rate: 0.001
+Learning rate decay step: 30
+Used data augmentation: True
+Checkpoint folder: /home/ubuntu/pytorch-benchmarks-main/model_checkpoints/1_TeslaV100-SXM2-32GB_resnet50_64_lr0001
+Number of workers: 4
+Warm up steps: 10
+Benchmark start : 2025/07/29 22:32:07
+
+Epoch 1
+
+=0x7fa688600000, src=0x7fa6b0d2c040, size=2.00 MB, hash=720fbb999f3ce3ede84140b7d1617ab45e7ce59288ac5ce1dd1444fe42b039bd, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa688800000, src=0x7fa6b0f2c040, size=2.00 MB, hash=b530424c730804847b87c85f949c74ebffd1d19390431b953f3e7f41f4fd7bb9, found=0)
+[2025-07-29 22:32:07] cuMemAlloc(dptr=0x6938b48, size=20.00 MB, aligned_size=20.00 MB)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa688e00000, src=0x7fa6b052b040, size=4.00 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa688e00000, src=0x7fa6b052b040, size=2.00 MB, hash=3a41e5ae8f7749a5bdb44633efe5f7d79a51953a9d14dc82673069e78d8e75d2, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa689000000, src=0x7fa6b072b040, size=2.00 MB, hash=12d7866057fd2b47953f7da6ca32d5bc8502b6061ff4918c348dcea261902014, found=0)
+[2025-07-29 22:32:07] cuMemcpyHtoDAsync(dst=0x7fa689200000, src=0x7fa69f82f040, size=7.81 MB)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa689200000, src=0x7fa69f82f040, size=2.00 MB, hash=fb03194ed01106f3ffff6b72135e8554316224e616d31a6094e1ca7decdc9d1e, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa689400000, src=0x7fa69fa2f040, size=2.00 MB, hash=16aa784275a81413b0bba61e4e9b9424f81493ff12934ffaac82ae545fa90b8a, found=0)
+[2025-07-29 22:32:07] try_deduplicate_page(va=0x7fa689600000, src=0x7fa69fc2f040, size=2.00 MB, hash=279451e08cb897818ab2142e59dcd2af67d848d836cd3eaf1b736a56d83283fe, found=0)
+[2025-07-29 22:32:08] cuMemAlloc(dptr=0x6435e98, size=38.00 MB, aligned_size=38.00 MB)
+[2025-07-29 22:32:08] cuMemcpyHtoDAsync(dst=0x302000000, src=0x7fa68a200000, size=36.75 MB)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x302000000, src=0x7fa68a200000, size=2.00 MB, hash=830c0530fb259f210c2e9bead7a4f5e922eb41c88e59b59c34287ec68ff3a555, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x302200000, src=0x7fa68a400000, size=2.00 MB, hash=60094270511470340636a01d0171074b494d67c1e079fbd34ff57dd5633b9b88, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x302400000, src=0x7fa68a600000, size=2.00 MB, hash=39663d29cf21730defa0bd4ad34b26097b43124c6735a72c95eaa2eb6da25862, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x302600000, src=0x7fa68a800000, size=2.00 MB, hash=2195e09397ff1f250ce624b297ca3ce9235c89fff08b2c222a8053f97a4e87e3, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x302800000, src=0x7fa68aa00000, size=2.00 MB, hash=0940aa052e3bb00d7405273314cae3e974274c597ebaa5d6d4365b737ac8a4e2, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x302a00000, src=0x7fa68ac00000, size=2.00 MB, hash=e71484cd47563bceeefefb67b21135c3f10f24abcbb7942cbb15082ad2d20bd6, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x302c00000, src=0x7fa68ae00000, size=2.00 MB, hash=80cbdd73c930efd7546bb59dfa3df5579815652daa09eabbc98ea8e748c38d37, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x302e00000, src=0x7fa68b000000, size=2.00 MB, hash=27036989863f3de23b1d2f7167fc967c5fbbd29dc401d1c778c38c3b02b176b0, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x303000000, src=0x7fa68b200000, size=2.00 MB, hash=adc8989036509b6e503a75708711c679ba28678b60716f2dc2dcbbad362c0004, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x303200000, src=0x7fa68b400000, size=2.00 MB, hash=63c98692acc3033e5f42e7e3e2b1139efc664b247e3f0b827c8e3d2696bc1e6d, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x303400000, src=0x7fa68b600000, size=2.00 MB, hash=3d380a977c10c58a9837c4538c1da227fce3cfd98668a59e6946c3c85386a111, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x303600000, src=0x7fa68b800000, size=2.00 MB, hash=a96a16a19ed8e4c3597c9cc1a07d8539d018c8e5b38f4ae5056607a3006f8590, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x303800000, src=0x7fa68ba00000, size=2.00 MB, hash=86fee9ec88f3630f0e61e5d7e2a60a36f8698b64a278b52f1cd1a4729404eb63, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x303a00000, src=0x7fa68bc00000, size=2.00 MB, hash=965072c4b87bf5bd80b2fbfceb4301cc37f4b1b5a705abfb9b355d3ac0eeb71a, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x303c00000, src=0x7fa68be00000, size=2.00 MB, hash=bfefe8dfdfc63a76bd0fbaa29e6329862a4f79c33a923e0e2bc1f9a14d0bd3e2, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x303e00000, src=0x7fa68c000000, size=2.00 MB, hash=6120f278632807cdec6673a256fe23e623a8e1281e6a3a8888469b4d6cd47ab1, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x304000000, src=0x7fa68c200000, size=2.00 MB, hash=0e68a624eb1165b65b5fc6050937aa831890a3d5ef06f3e940fe31ea5eae5f77, found=0)
+[2025-07-29 22:32:08] try_deduplicate_page(va=0x304200000, src=0x7fa68c400000, size=2.00 MB, hash=925a8f1c714c1477f1a7359f78ac918cf93fe60b74362b5b297c59f412b87165, found=0)
+[2025-07-29 22:32:08] cuMemAlloc(dptr=0x6377e18, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemAlloc
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFree
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeHost
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:08] cuMemAlloc(dptr=0x0, size=15.00 KB)
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemAlloc
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFree
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeHost
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:08] cuMemFree(dptr=0x0)
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemAlloc
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFree
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeHost
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:08] cuMemFree(dptr=0x0)
+[2025-07-29 22:32:08] cuMemAlloc(dptr=0x0, size=1.00 KB)
+[2025-07-29 22:32:08] cuMemAlloc(dptr=0x0, size=128.00 KB)
+[2025-07-29 22:32:08] cuMemAlloc(dptr=0x0, size=8.00 MB, aligned_size=8.00 MB)
+[2025-07-29 22:32:08] cuMemFree(dptr=0x0)
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemAlloc
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFree
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeHost
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:08] cuMemAlloc(dptr=0x6377d98, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemAlloc
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFree
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeHost
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:08] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x51a1f048, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x51a1f048, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x51a839b8, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x51a0bab8, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x521d17a8, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x51a83978, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x52220d18, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x52220c58, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x522ccb28, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x522cca68, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x52440908, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x52440848, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x524e0118, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x524e0058, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x532ae2e8, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x532ae228, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x532f2878, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x532f27b8, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x533a0028, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5339ff68, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5344f758, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5344f758, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x533a0028, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x534a4b38, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5344f738, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53503de8, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x534a4ad8, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x535c0ef8, size=136.00 MB, aligned_size=136.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x535ebca8, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53651458, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5368fb08, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5368fb08, size=136.00 MB, aligned_size=136.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x536cc7a8, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53714678, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x537145b8, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53764028, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53764028, size=136.00 MB, aligned_size=136.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53cacaf8, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53cf4a98, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53cf49d8, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53d64598, size=16.00 MB, aligned_size=16.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53d705a8, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53d704e8, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53dbe2e8, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53d70568, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53e08148, size=82.00 MB, aligned_size=82.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53e3da78, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53e68ce8, size=82.00 MB, aligned_size=82.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53ea1128, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53ec62b8, size=14.00 MB, aligned_size=14.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53ec62b8, size=82.00 MB, aligned_size=82.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53ee5fb8, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53f2ac68, size=14.00 MB, aligned_size=14.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53f35e48, size=14.00 MB, aligned_size=14.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53f35e48, size=82.00 MB, aligned_size=82.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53f35e08, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53f9a768, size=14.00 MB, aligned_size=14.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53fa5948, size=14.00 MB, aligned_size=14.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53fa5948, size=82.00 MB, aligned_size=82.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53fc55f8, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5400a528, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53fc56b8, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5404a738, size=50.00 MB, aligned_size=50.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5405cda8, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5405b278, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x540993b8, size=72.00 MB, aligned_size=72.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x540d8c18, size=72.00 MB, aligned_size=72.00 MB)
+[2025-07-29 22:32:09] cuMemFree(dptr=0x0)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x0, size=1.00 KB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x0, size=128.00 KB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x0, size=8.00 MB, aligned_size=8.00 MB)
+[2025-07-29 22:32:09] cuMemFree(dptr=0x0)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x0, size=1.00 KB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x0, size=128.00 KB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x0, size=8.00 MB, aligned_size=8.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x54141c88, size=26.00 MB, aligned_size=26.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x0, size=15.00 KB)
+[2025-07-29 22:32:09] cuMemFree(dptr=0x0)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x0, size=1.00 KB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x0, size=128.00 KB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x0, size=8.00 MB, aligned_size=8.00 MB)
+[2025-07-29 22:32:09] cuMemFree(dptr=0x0)
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuGetProcAddress
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuMemAlloc
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuMemFree
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuMemFreeHost
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuMemFreeAsync
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuMemcpyHtoD
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:09] cuGetProcAddress called for: cuMemcpyHtoDAsync
+[2025-07-29 22:32:09] cuMemFree(dptr=0x0)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa6381080c8, size=72.00 MB, aligned_size=72.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a3dfb38, size=184.00 MB, aligned_size=184.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a4294d8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a4294d8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a3c5808, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a3ba678, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a48e158, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a491518, size=98.00 MB, aligned_size=98.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a491518, size=128.00 MB, aligned_size=128.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a4f1b48, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a4f1b48, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a4f1b48, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a547a48, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a3c5808, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x54145218, size=196.00 MB, aligned_size=196.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x7fa63a547a48, size=222.00 MB, aligned_size=222.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x541456f8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x54141b58, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x5405c818, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53cdf8c8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x53e50208, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x541457f8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x541457f8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x541457f8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x541457f8, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemAlloc(dptr=0x534aa768, size=2.00 MB, aligned_size=2.00 MB)
+[2025-07-29 22:32:09] cuMemcpyHtoDAsync(dst=0x322000000, src=0x7fa630000000, size=36.75 MB)
+[2025-07-29 22:32:09] try_deduplicate_page(va=0x322000000, src=0x7fa630000000, size=2.00 MB, hash=830c0530fb259f210c2e9bead7a4f5e922eb41c88e59b59c34287ec68ff3a555, found=1)
+[2025-07-29 22:32:09] Deduplicated page at VA: 0x322000000, Size: 2.00 MB, Saved: 2.00 MB, pid: 23786
+[2025-07-29 22:32:09] try_deduplicate_page(va=0x322400000, src=0x7fa630400000, size=2.00 MB, hash=39663d29cf21730defa0bd4ad34b26097b43124c6735a72c95eaa2eb6da25862, found=1)
+[2025-07-29 22:32:09] Deduplicated page at VA: 0x322400000, Size: 2.00 MB, Saved: 4.00 MB, pid: 23786
+get fault_addr:0x32202a000  base_addr:0x322000000  cur_pid:23786  fault_type:3
+CoW completed for fault_addr:0x32202a000 base_addr:0x322000000 (Hash:830c0530fb259f210c2e9bead7a4f5e922eb41c88e59b59c34287ec68ff3a555)
+[2025-07-29 22:32:09] try_deduplicate_page(va=0x322800000, src=0x7fa630800000, size=2.00 MB, hash=0940aa052e3bb00d7405273314cae3e974274c597ebaa5d6d4365b737ac8a4e2, found=1)
+[2025-07-29 22:32:09] Deduplicated page at VA: 0x322800000, Size: 2.00 MB, Saved: 6.00 MB, pid: 23786
+get fault_addr:0x32240a000  base_addr:0x322400000  cur_pid:23786  fault_type:3
+CoW completed for fault_addr:0x32240a000 base_addr:0x322400000 (Hash:39663d29cf21730defa0bd4ad34b26097b43124c6735a72c95eaa2eb6da25862)
+get fault_addr:0x322802000  base_addr:0x322800000  cur_pid:23786  fault_type:3
+CoW completed for fault_addr:0x322802000 base_addr:0x322800000 (Hash:0940aa052e3bb00d7405273314cae3e974274c597ebaa5d6d4365b737ac8a4e2)
+[2025-07-29 22:32:09] try_deduplicate_page(va=0x322c00000, src=0x7fa630c00000, size=2.00 MB, hash=80cbdd73c930efd7546bb59dfa3df5579815652daa09eabbc98ea8e748c38d37, found=1)
+[2025-07-29 22:32:09] Deduplicated page at VA: 0x322c00000, Size: 2.00 MB, Saved: 8.00 MB, pid: 23786
+get fault_addr:0x322c16000  base_addr:0x322c00000  cur_pid:23786  fault_type:0
+CoW completed for fault_addr:0x322c16000 base_addr:0x322c00000 (Hash:80cbdd73c930efd7546bb59dfa3df5579815652daa09eabbc98ea8e748c38d37)
+[2025-07-29 22:32:09] try_deduplicate_page(va=0x323000000, src=0x7fa631000000, size=2.00 MB, hash=adc8989036509b6e503a75708711c679ba28678b60716f2dc2dcbbad362c0004, found=1)
+[2025-07-29 22:32:09] Deduplicated page at VA: 0x323000000, Size: 2.00 MB, Saved: 10.00 MB, pid: 23786
+[2025-07-29 22:32:09] try_deduplicate_page(va=0x323400000, src=0x7fa631400000, size=2.00 MB, hash=3d380a977c10c58a9837c4538c1da227fce3cfd98668a59e6946c3c85386a111, found=1)
+[2025-07-29 22:32:09] Deduplicated page at VA: 0x323400000, Size: 2.00 MB, Saved: 12.00 MB, pid: 23786
+[2025-07-29 22:32:09] try_deduplicate_page(va=0x323800000, src=0x7fa631800000, size=2.00 MB, hash=86fee9ec88f3630f0e61e5d7e2a60a36f8698b64a278b52f1cd1a4729404eb63, found=1)
+[2025-07-29 22:32:09] Deduplicated page at VA: 0x323800000, Size: 2.00 MB, Saved: 14.00 MB, pid: 23786
+[2025-07-29 22:32:09] try_deduplicate_page(va=0x323c00000, src=0x7fa631c00000, size=2.00 MB, hash=bfefe8dfdfc63a76bd0fbaa29e6329862a4f79c33a923e0e2bc1f9a14d0bd3e2, found=1)
+[2025-07-29 22:32:09] Deduplicated page at VA: 0x323c00000, Size: 2.00 MB, Saved: 16.00 MB, pid: 23786
+[2025-07-29 22:32:09] try_deduplicate_page(va=0x324000000, src=0x7fa632000000, size=2.00 MB, hash=0e68a624eb1165b65b5fc6050937aa831890a3d5ef06f3e940fe31ea5eae5f77, found=1)
+[2025-07-29 22:32:09] Deduplicated page at VA: 0x324000000, Size: 2.00 MB, Saved: 18.00 MB, pid: 23786
+get fault_addr:0x302123000  base_addr:0x302000000  cur_pid:23786  fault_type:3
+CoW completed for fault_addr:0x302123000 base_addr:0x302000000 (Hash:830c0530fb259f210c2e9bead7a4f5e922eb41c88e59b59c34287ec68ff3a555)

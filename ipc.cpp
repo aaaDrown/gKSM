@@ -1,0 +1,136 @@
+#include "ipc.h"
+
+
+int ipc_recv_fd(int sock) {
+    struct msghdr msg = {0};
+    struct iovec iov[1];
+    char buf[1];
+    
+    union {
+        struct cmsghdr cm;
+        char control[CMSG_SPACE(sizeof(int))];
+    } control_un;
+    
+    msg.msg_control = control_un.control;
+    msg.msg_controllen = sizeof(control_un.control);
+    
+    iov[0].iov_base = buf;
+    iov[0].iov_len = sizeof(buf);
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
+    
+    if (recvmsg(sock, &msg, 0) <= 0) {
+        return -1;
+    }
+    
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+    if (!cmsg || cmsg->cmsg_level != SOL_SOCKET || 
+        cmsg->cmsg_type != SCM_RIGHTS) {
+        return -1;
+    }
+    
+    int fd;
+    memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
+    return fd;
+}
+
+// 发送文件描述符
+bool ipc_send_fd(int sock, int fd) {
+    struct msghdr msg = {0};
+    struct iovec iov[1];
+    char buf[1] = {'F'};
+    
+    union {
+        struct cmsghdr cm;
+        char control[CMSG_SPACE(sizeof(int))];
+    } control_un;
+    
+    msg.msg_control = control_un.control;
+    msg.msg_controllen = sizeof(control_un.control);
+    
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
+    
+    iov[0].iov_base = buf;
+    iov[0].iov_len = sizeof(buf);
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
+    
+    return sendmsg(sock, &msg, 0) > 0;
+}
+
+// 获取当前进程的IPC套接字路径
+std::string ipc_get_current_sock_path() {
+    char path[108];
+    snprintf(path, sizeof(path), "/tmp/cuda_dedup_%d.sock", getpid());
+    return std::string(path);
+}
+
+// 清理IPC模块
+void ipc_cleanup() {
+    g_ipc_state.running = false;
+    
+    // 关闭监听套接字
+    if (g_ipc_state.ipc_sock != -1) {
+        // 触发accept退出
+        shutdown(g_ipc_state.ipc_sock, SHUT_RDWR);
+        close(g_ipc_state.ipc_sock);
+        
+        // 删除套接字文件
+        unlink(ipc_get_current_sock_path().c_str());
+    }
+    
+    // 等待处理线程结束
+    if (g_ipc_state.handler_thread) {
+        pthread_join(g_ipc_state.handler_thread, NULL);
+    }
+}
+
+// 从指定进程获取共享页面的文件描述符
+int ipc_get_shared_fd(pid_t owner_pid, const char* sock_path, const char* hash) {
+    // 连接到拥有者进程
+    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("socket creation failed");
+        return -1;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, sock_path, sizeof(addr.sun_path)-1);
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr))) {
+        perror("connect failed");
+        close(sock);
+        return -1;
+    }
+
+    // 发送请求：'R' + 哈希值
+    char request = 'R';
+    if (write(sock, &request, 1) != 1) {
+        perror("write request failed");
+        close(sock);
+        return -1;
+    }
+    if (write(sock, hash, 65) != 65) {
+        perror("write hash failed");
+        close(sock);
+        return -1;
+    }
+
+    // 接收文件描述符
+    int fd = ipc_recv_fd(sock);
+    close(sock);
+
+    if (fd < 0) {
+        printf("Failed to receive FD for hash %s from pid %d\n", hash, owner_pid);
+        return -1;
+    }
+    
+    return fd;
+}
+
