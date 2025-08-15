@@ -10,15 +10,16 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
-
+#include <sys/prctl.h>
 #include "tools.h"
 #include "ipc.h"
 
-const int MAX_DEDUPE_PAGES = 2048;
-const int HASH_SIZE = 65; // SHA256字符串长度
+const int MAX_DEDUPE_PAGES = 20480;
+const int HASH_SIZE = 17; // SHA256字符串长度
 #define CMD_START_USERFAULT _IOW('L', 1, unsigned long)
 #define CMD_UPDATE_PAGEFAULT _IOW('L', 4, unsigned long)
-#define MAX_SHARED_REFS 128
+#define MAX_SHARED_REFS 32
+#define DEDUP_DEVICE 0
 typedef int ShareableHandle;
 struct SharedPageInfo {
     char hash[HASH_SIZE];         
@@ -41,6 +42,7 @@ struct LocalPageInfo {
 
 struct SharedMemory {
     pthread_mutex_t mutex;
+    int mutex_initialized; 
     int initialized; 
     int page_count;  
     SharedPageInfo pages[MAX_DEDUPE_PAGES]; 
@@ -65,7 +67,6 @@ static SharedMemory* g_shared_memory = nullptr;
 static std::map<CUdeviceptr, VMMAllocInfo> g_allocations_vmm;
 
 int userfault_fd = -1;
-size_t g_size = 4096;
 std::mutex g_mutex; 
 size_t g_total_allocated = 0;
 size_t g_current_allocated = 0;

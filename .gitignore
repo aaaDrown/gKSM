@@ -1,12 +1,8 @@
 .vscode/
 build/
 libcudahook.so
-a
-a.cu
 log.txt
 matrix
-test_image.jpg
-test/
-tmp.cu
 gsh/
-a.cpp
+vllm/
+init.sh
