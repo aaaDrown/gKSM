@@ -12,36 +12,6 @@ std::string current_time() {
     return std::string(buffer);
 }
 
-void get_command_line() {
-    char path[256];
-    char cmdline[4096];
-    int i;
-
-    // 构建路径 /proc/self/cmdline
-    snprintf(path, sizeof(path), "/proc/self/cmdline");
-
-    // 打开并读取文件
-    FILE *fp = fopen(path, "r");
-    if (fp == NULL) {
-        perror("fopen");
-        return;
-    }
-
-    if (fgets(cmdline, sizeof(cmdline), fp) != NULL) {
-        // 将空字符替换为换行符以便打印
-        for (i = 0; i < (int)strlen(cmdline); i++) {
-            if (cmdline[i] == '\0') {
-                cmdline[i] = '\n';
-            }
-        }
-        printf("Command Line:\n%s\n", cmdline);
-    } else {
-        perror("fgets");
-    }
-
-    fclose(fp);
-}
-
 std::string format_bytes(size_t bytes) {
     const char* units[] = {"B", "KB", "MB", "GB", "TB"};
     int unit_index = 0;
@@ -55,6 +25,33 @@ std::string format_bytes(size_t bytes) {
     char buffer[32];
     snprintf(buffer, sizeof(buffer), "%.2f %s", size, units[unit_index]);
     return std::string(buffer);
+}
+
+// 线程控制变量
+static std::atomic<bool> g_monitor_running(true);
+
+// 监控线程函数
+void monitor_thread_func() {
+    // while (g_monitor_running) {
+    //     std::this_thread::sleep_for(std::chrono::seconds(5));
+        
+    //     printf("\n==== CUDA-HOOK API TIMING SUMMARY ====\n");
+    //     printf("%-32s %12s %12s %12s\n", "API", "calls", "total(ms)", "avg(us)");
+    //     for (int i = 0; i < API_COUNT; ++i) {
+    //         // 使用acquire内存序确保看到最新的更新
+    //         uint64_t calls = g_api_stats[i].calls.load(std::memory_order_acquire);
+    //         uint64_t total_ns = g_api_stats[i].total_ns.load(std::memory_order_acquire);
+    //         if (calls == 0) continue;
+    //         double total_ms = double(total_ns) / 1e6;
+    //         double avg_us = double(total_ns) / double(calls) / 1e3;
+    //         printf("%-32s %12llu %12.3f %12.3f\n",
+    //                g_api_names[i],
+    //                (unsigned long long)calls,
+    //                total_ms,
+    //                avg_us);
+    //     }
+    //     printf("======================================\n");
+    // }
 }
 
 ////////////////////////////////////////////////
@@ -222,7 +219,6 @@ __global__ void gpu_hash_kernel_batch(
     }
 }
 
-// 主机函数：单个页面哈希
 std::string gpu_fast_hash_single(unsigned long long d_data, size_t size) {
 
     uint64_t* d_result = nullptr;
@@ -251,7 +247,6 @@ std::string gpu_fast_hash_single(unsigned long long d_data, size_t size) {
     return std::string(hex_str, 16);
 }
 
-// 主机函数：批量页面哈希
 void gpu_fast_hash_batch(
     const void** pages,
     size_t page_size,
@@ -261,7 +256,6 @@ void gpu_fast_hash_batch(
     uint8_t* d_pages = nullptr;
     uint64_t* d_results = nullptr;
     
-    // 分配设备内存
     cudaMalloc(&d_pages, num_pages * page_size);
     cudaMalloc(&d_results, num_pages * sizeof(uint64_t));
     
@@ -304,4 +298,164 @@ std::string fast_hash(const void* data, size_t size) {
     std::ostringstream oss;
     oss << std::hex << std::setfill('0') << std::setw(16) << hash;
     return oss.str();
+}
+
+
+
+std::string trim(const std::string& str) {
+    size_t start = str.find_first_not_of(" \t\n\r");
+    size_t end = str.find_last_not_of(" \t\n\r");
+    if (start == std::string::npos || end == std::string::npos)
+        return "";
+    return str.substr(start, end - start + 1);
+}
+
+std::string to_lower(const std::string& str) {
+    std::string result = str;
+    std::transform(result.begin(), result.end(), result.begin(), ::tolower);
+    return result;
+}
+
+bool parse_bool(const std::string& value) {
+    std::string lower_val = to_lower(trim(value));
+    return (lower_val == "true" || lower_val == "yes" || lower_val == "1" || lower_val == "on");
+}
+
+int parse_int(const std::string& value, int default_value = 0) {
+    try {
+        return std::stoi(trim(value));
+    } catch (...) {
+        return default_value;
+    }
+}
+
+size_t parse_size(const std::string& value, size_t default_value = 0) {
+    try {
+        std::string val = trim(value);
+        size_t multiplier = 1;
+        
+        if (!val.empty()) {
+            char last_char = val[val.size() - 1];
+            if (last_char == 'K' || last_char == 'k') {
+                multiplier = 1024;
+                val = val.substr(0, val.size() - 1);
+            } else if (last_char == 'M' || last_char == 'm') {
+                multiplier = 1024 * 1024;
+                val = val.substr(0, val.size() - 1);
+            } else if (last_char == 'G' || last_char == 'g') {
+                multiplier = 1024 * 1024 * 1024;
+                val = val.substr(0, val.size() - 1);
+            }
+        }
+        
+        return std::stoull(val) * multiplier;
+    } catch (...) {
+        return default_value;
+    }
+}
+
+bool parse_config_file(const std::string& filename, HookConfig& config) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        if (config.verbose_logging) {
+            printf("Config file %s not found, using defaults\n", filename.c_str());
+        }
+        return false;
+    }
+    
+    std::string line;
+    int line_num = 0;
+
+    while (std::getline(file, line)) {
+        line_num++;
+        size_t comment_pos = line.find('#');
+        if (comment_pos != std::string::npos) {
+            line = line.substr(0, comment_pos);
+        }
+        
+        std::string trimmed_line = trim(line);
+        if (trimmed_line.empty()) {
+            continue;
+        }
+
+        size_t equals_pos = trimmed_line.find('=');
+        if (equals_pos == std::string::npos) {
+            if (config.verbose_logging) {
+                printf("Invalid config line %d: %s\n", line_num, trimmed_line.c_str());
+            }
+            continue;
+        }
+        
+        std::string key = trim(trimmed_line.substr(0, equals_pos));
+        std::string value = trim(trimmed_line.substr(equals_pos + 1));
+        
+        if (value.empty()) {
+            if (config.verbose_logging) {
+                printf("Empty value for key %s at line %d\n", key.c_str(), line_num);
+            }
+            continue;
+        }
+        
+        if (key == "enable_deduplication") {
+            config.enable_deduplication = parse_bool(value);
+        } else if (key == "enable_background_scan") {
+            config.enable_background_scan = parse_bool(value);
+        } else if (key == "initial_scan_interval_ms") {
+            config.initial_scan_interval_ms = parse_int(value, 1000);
+        } else if (key == "max_scan_interval_ms") {
+            config.max_scan_interval_ms = parse_int(value, 1000);
+        } else if (key == "boot_scan_interval_ms") {
+            config.boot_scan_interval_ms = parse_int(value, 1000);
+        } else if (key == "stable_threshold") {
+            config.stable_threshold = parse_int(value, 2);
+        } else if (key == "max_batch_size") {
+            config.max_batch_size = parse_int(value, 64);
+        } else if (key == "verbose_logging") {
+            config.verbose_logging = parse_bool(value);
+        } else if (key == "enable_statistics") {
+            config.enable_statistics = parse_bool(value);
+        } else if (key == "userfault_fd_path") {
+            config.userfault_fd_path = strdup(value.c_str());
+        } else if (key == "device_id") {
+            config.device_id = parse_int(value, 0);
+        } else if (key == "page_size") {
+            config.page_size = parse_size(value, 0);
+        } else if (key == "shared_memory_name") {
+            config.shared_memory_name = strdup(value.c_str());
+        } else if (key == "max_dedupe_pages") {
+            config.max_dedupe_pages = parse_int(value, 1024);
+        } else if (key == "max_shared_refs") {
+            config.max_shared_refs = parse_int(value, 32);
+        } else if (key == "hook_path") {
+            config.hook_path = strdup(value.c_str());
+        } else if (key == "orig_path") {
+            config.orig_path = strdup(value.c_str());
+        } else if (config.verbose_logging) {
+            printf("Unknown config key: %s\n", key.c_str());
+        } 
+    }
+    
+    file.close();
+    printf("Configuration loaded from %s\n", filename.c_str());
+    return true;
+}
+
+void print_config(HookConfig g_hook_config) {    
+    printf("=== CUDA Hook Configuration ===\n");
+    printf("Deduplication: %s\n", g_hook_config.enable_deduplication ? "Enabled" : "Disabled");
+    printf("Background Scan: %s\n", g_hook_config.enable_background_scan ? "Enabled" : "Disabled");
+    printf("Init Scan Interval: %d ms\n", g_hook_config.initial_scan_interval_ms);
+    printf("Max Scan Interval: %d ms\n", g_hook_config.max_scan_interval_ms);
+    printf("Boot Scan Interval: %d ms\n", g_hook_config.boot_scan_interval_ms);
+    printf("Stable Threshold: %d\n", g_hook_config.stable_threshold);
+    printf("Max Batch Size: %d\n", g_hook_config.max_batch_size);
+    printf("Verbose Logging: %s\n", g_hook_config.verbose_logging ? "Enabled" : "Disabled");
+    printf("Statistics: %s\n", g_hook_config.enable_statistics ? "Enabled" : "Disabled");
+    printf("Userfault FD Path: %s\n", g_hook_config.userfault_fd_path);
+    printf("Device ID: %d\n", g_hook_config.device_id);
+    printf("Page Size: %s\n", format_bytes(g_hook_config.page_size).c_str());
+    printf("Shared Memory Name: %s\n", g_hook_config.shared_memory_name);
+    printf("Max Dedupe Pages: %d\n", g_hook_config.max_dedupe_pages);
+    printf("Max Shared Refs: %d\n", g_hook_config.max_shared_refs);
+    printf("================================\n");
 }

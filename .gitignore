@@ -1,8 +1,8 @@
 .vscode/
 build/
-libcudahook.so
-log.txt
-matrix
-gsh/
 vllm/
 init.sh
+run.sh
+cuda.h
+log*
+hook.conf

@@ -69,21 +69,16 @@ std::string ipc_get_current_sock_path() {
     return std::string(path);
 }
 
-// 清理IPC模块
 void ipc_cleanup() {
     g_ipc_state.running = false;
     
-    // 关闭监听套接字
     if (g_ipc_state.ipc_sock != -1) {
-        // 触发accept退出
         shutdown(g_ipc_state.ipc_sock, SHUT_RDWR);
         close(g_ipc_state.ipc_sock);
         
-        // 删除套接字文件
         unlink(ipc_get_current_sock_path().c_str());
     }
     
-    // 等待处理线程结束
     if (g_ipc_state.handler_thread) {
         pthread_join(g_ipc_state.handler_thread, NULL);
     }
@@ -91,7 +86,6 @@ void ipc_cleanup() {
 
 // 从指定进程获取共享页面的文件描述符
 int ipc_get_shared_fd(pid_t owner_pid, const char* sock_path, const char* hash) {
-    // 连接到拥有者进程
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) {
         perror("socket creation failed");
@@ -109,14 +103,13 @@ int ipc_get_shared_fd(pid_t owner_pid, const char* sock_path, const char* hash) 
         return -1;
     }
 
-    // 发送请求：'R' + 哈希值
     char request = 'R';
     if (write(sock, &request, 1) != 1) {
         perror("write request failed");
         close(sock);
         return -1;
     }
-    if (write(sock, hash, 65) != 65) {
+    if (write(sock, hash, HASH_SIZE) != HASH_SIZE) {
         perror("write hash failed");
         close(sock);
         return -1;
@@ -134,3 +127,53 @@ int ipc_get_shared_fd(pid_t owner_pid, const char* sock_path, const char* hash) 
     return fd;
 }
 
+bool ipc_transfer_ownership(pid_t new_owner_pid, const IpcRequest* req, int shareable_fd) {
+    char sock_path[108];
+    snprintf(sock_path, sizeof(sock_path), "/tmp/cuda_dedup_%d.sock", new_owner_pid);
+    
+    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("socket creation failed");
+        return false;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, sock_path, sizeof(addr.sun_path)-1);
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr))) {
+        perror("connect failed");
+        close(sock);
+        return false;
+    }
+
+    char request_type = 'T';
+    if (write(sock, &request_type, 1) != 1) {
+        perror("write request type failed");
+        close(sock);
+        return false;
+    }
+
+    if (write(sock, req, sizeof(IpcRequest)) != sizeof(IpcRequest)) {
+        perror("write request struct failed");
+        close(sock);
+        return false;
+    }
+
+    if (!ipc_send_fd(sock, shareable_fd)) {
+        perror("send fd failed");
+        close(sock);
+        return false;
+    }
+
+    IpcResponse resp;
+    if (read(sock, &resp, sizeof(IpcResponse)) != sizeof(IpcResponse)) {
+        perror("read response failed");
+        close(sock);
+        return false;
+    }
+
+    close(sock);
+    return resp.success;
+}

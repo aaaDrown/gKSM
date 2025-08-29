@@ -14,11 +14,11 @@
 #include "tools.h"
 #include "ipc.h"
 
-const int MAX_DEDUPE_PAGES = 20480;
-const int HASH_SIZE = 17; // SHA256字符串长度
+const int MAX_DEDUPE_PAGES = 100000;
 #define CMD_START_USERFAULT _IOW('L', 1, unsigned long)
 #define CMD_UPDATE_PAGEFAULT _IOW('L', 4, unsigned long)
-#define MAX_SHARED_REFS 32
+#define MAX_SHARED_REFS 64
+#define MAX_MEMCPY_LIMIT 3
 #define DEDUP_DEVICE 0
 typedef int ShareableHandle;
 struct SharedPageInfo {
@@ -36,16 +36,24 @@ struct SharedPageInfo {
 struct LocalPageInfo {
     CUdeviceptr va;                
     CUmemGenericAllocationHandle handle;          
-    char hash[HASH_SIZE];  
-    bool dedup_flag = false;        
+    char hash[HASH_SIZE];     
+    bool pagefault_flag = false; 
+    
+    // background scan   
+    int memcpy_cnt = 0;
+    char prev_hash[HASH_SIZE];
+    bool is_stable = false;
+    bool is_deduped = false;
+    int unchanged_scans = 0; 
+
+    bool is_exported = false;
 };
 
 struct SharedMemory {
     pthread_mutex_t mutex;
-    int mutex_initialized; 
-    int initialized; 
-    int page_count;  
-    SharedPageInfo pages[MAX_DEDUPE_PAGES]; 
+    int initialized;
+    int page_count;
+    SharedPageInfo pages[MAX_DEDUPE_PAGES];
 };
 
 struct fault_info {
@@ -60,26 +68,56 @@ typedef struct {
     size_t aligned_size;
 } VMMAllocInfo;
 
-// (虚拟地址 -> 页) 有多个page副本,本地
 std::map<CUdeviceptr, LocalPageInfo>* g_page_map = nullptr;
 std::map<CUmemGenericAllocationHandle, size_t> g_allocations_create;
 static SharedMemory* g_shared_memory = nullptr;
 static std::map<CUdeviceptr, VMMAllocInfo> g_allocations_vmm;
 
 int userfault_fd = -1;
+pid_t g_dedup_pid = -1;
 std::mutex g_mutex; 
 size_t g_total_allocated = 0;
 size_t g_current_allocated = 0;
 size_t g_saved_memory = 0; 
+size_t g_saved_memory_print_threshold = 500 * 1024 * 1024;
 size_t g_page_size = 2 * 1024 * 1024; 
 size_t g_cuMemCpy_size = 0;
-pid_t g_dedup_pid;
+size_t pages_deduped = 0;
+
+size_t g_background_scans = 0;
+
+bool g_background_scanning = false;
+bool g_userfault_handling = false;
+bool g_ipc_handling = false;
+pthread_t background_scan;
+pthread_t userfault_handler;
+pthread_t ipc_handler;
+
 const char * hook_path = "/home/ubuntu/dedup/build/libcuda.so.1";
 const char * orig_path = "/usr/lib/x86_64-linux-gnu/libcuda-native.so";
+
+HookConfig g_hook_config = {
+    .enable_deduplication = true,
+    .enable_background_scan = true,
+    .initial_scan_interval_ms = 2000,
+    .max_scan_interval_ms = 30000,
+    .boot_scan_interval_ms = 30000,
+    .stable_threshold = 3,
+    .max_batch_size = 16,
+    .verbose_logging = false,
+    .enable_statistics = true,
+    .userfault_fd_path = "/dev/dedup_dev",
+    .device_id = 0,
+    .page_size = 2097152,
+    .shared_memory_name = "/cuda_dedup_shared",
+    .max_dedupe_pages = 20480,
+    .max_shared_refs = 32
+};
 
 void init_shared_memory();
 void init_ipc();
 void init_hook_api();
 void* ipc_handler_thread(void* arg);
 void init_userfault();
-// nvcc matrix.cu -o build/matrix -ldl -lcuda -I/usr/local/cuda/include -L/usr/local/cuda/lib64 -L/lib/x86_64-linux-gnu
+void init_background_scan();
+bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const char* hash);

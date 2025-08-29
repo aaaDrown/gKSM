@@ -1,0 +1,52 @@
+Volta/Telsa：跑vllm会有triton编译报错
+使用525驱动，cuda12，A100的配置
+
+batch size=16
+resnet 50:
+单实例
+memory=790MB
+time=37s
+
+memory-base=802MB
+time-base=36s
+
+2实例
+memory1=790MB
+memory2=696MB
+time=2m26s 
+
+memory-base=802MB
+time-base=2m25s
+
+vgg16:
+单实例
+memory=1840MB
+time=45s
+
+memory-base=1850MB
+time-base=48s
+
+2实例
+memory1=1840MB
+memory2=1310MB
+time=1m29s 
+
+memory-base=1850MB
+time-base=1m23s
+
+1.CPU/GPU比较
+2.微调模型比较
+3.单卡多实例比较
+4.多workload
+5.重复数据来源分解
+6.性能开销
+
+1.通用性
+2.
+
+malloc 按需分配
+
+1.私有化部署，多用户
+2.N pod部署重删，区分公有云私有云
+3.同一基座模型，lora部分层微调模型，部分重删
+4.前缀kvcache重删
