@@ -50,3 +50,4 @@ malloc 按需分配
 2.N pod部署重删，区分公有云私有云
 3.同一基座模型，lora部分层微调模型，部分重删
 4.前缀kvcache重删
+5.公有云function service

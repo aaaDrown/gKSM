@@ -52,6 +52,7 @@ enum ApiId {
     API_HASH_XXH64_GPU,
     API_BACKGROUND_SCAN,
     API_CU_CTX_SYNCHRONIZE,
+    API_FIND_PAGE_BY_HASH,
     API_COUNT
 };
 
@@ -109,7 +110,8 @@ static const char* g_api_names[API_COUNT] = {
     "hash_xxh64",
     "hash_xxh64_gpu",
     "background_scan",
-    "cuCtxSynchronize"
+    "cuCtxSynchronize",
+    "find_page_by_hash"
 };
 
 typedef struct {
@@ -140,6 +142,5 @@ std::string sha256(const void* data, size_t size);
 std::string fast_hash(const void* data, size_t size);
 std::string gpu_fast_hash_single(unsigned long long d_data, size_t size);
 void gpu_fast_hash_batch(const void** pages, size_t page_size, size_t num_pages, uint64_t* results);
-void monitor_thread_func();
 bool parse_config_file(const std::string& filename, HookConfig& config);
 void print_config(HookConfig g_hook_config);

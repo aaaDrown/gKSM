@@ -6,3 +6,4 @@ run.sh
 cuda.h
 log*
 hook.conf
+a.cpp

@@ -177,3 +177,58 @@ bool ipc_transfer_ownership(pid_t new_owner_pid, const IpcRequest* req, int shar
     close(sock);
     return resp.success;
 }
+
+bool ipc_send_dedup_request(pid_t target_pid, unsigned long long va, const char* hash) {
+    printf("gsh in ipc_send_dedup_request, va=%lx, hash=%s\n", va, hash);
+    // 获取目标进程的socket路径
+    char sock_path[108];
+    snprintf(sock_path, sizeof(sock_path), "/tmp/cuda_dedup_%d.sock", target_pid);
+    
+    // 创建socket并连接
+    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("socket creation failed");
+        return false;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, sock_path, sizeof(addr.sun_path)-1);
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("connect failed");
+        close(sock);
+        return false;
+    }
+
+    // 准备并发送重删请求
+    DedupRequest request;
+    request.va = va;
+    strncpy(request.hash, hash, HASH_SIZE);
+    request.src_pid = getpid();
+
+    char request_type = 'D';
+    if (write(sock, &request_type, 1) != 1) {
+        perror("write request type failed");
+        close(sock);
+        return false;
+    }
+
+    if (write(sock, &request, sizeof(request)) != sizeof(request)) {
+        perror("write request failed");
+        close(sock);
+        return false;
+    }
+
+    // 等待响应
+    DedupResponse response;
+    if (read(sock, &response, sizeof(response)) != sizeof(response)) {
+        perror("read response failed");
+        close(sock);
+        return false;
+    }
+
+    close(sock);
+    return response.success;
+}

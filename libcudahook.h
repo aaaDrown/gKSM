@@ -14,10 +14,10 @@
 #include "tools.h"
 #include "ipc.h"
 
-const int MAX_DEDUPE_PAGES = 100000;
+const int MAX_DEDUPE_PAGES = 20480;
 #define CMD_START_USERFAULT _IOW('L', 1, unsigned long)
 #define CMD_UPDATE_PAGEFAULT _IOW('L', 4, unsigned long)
-#define MAX_SHARED_REFS 64
+#define MAX_SHARED_REFS 32
 #define MAX_MEMCPY_LIMIT 3
 #define DEDUP_DEVICE 0
 typedef int ShareableHandle;
@@ -49,11 +49,21 @@ struct LocalPageInfo {
     bool is_exported = false;
 };
 
+struct CandidatePageInfo {
+    char hash[HASH_SIZE];
+    pid_t pid;
+    CUdeviceptr va;
+    bool valid;
+    int unchanged_scans; 
+};
+
 struct SharedMemory {
     pthread_mutex_t mutex;
     int initialized;
-    int page_count;
-    SharedPageInfo pages[MAX_DEDUPE_PAGES];
+    int shared_page_count;
+    int candidate_page_count;
+    SharedPageInfo shared_pages[MAX_DEDUPE_PAGES];
+    CandidatePageInfo candidate_pages[MAX_DEDUPE_PAGES]; 
 };
 
 struct fault_info {
@@ -69,14 +79,12 @@ typedef struct {
 } VMMAllocInfo;
 
 std::map<CUdeviceptr, LocalPageInfo>* g_page_map = nullptr;
-std::map<CUmemGenericAllocationHandle, size_t> g_allocations_create;
 static SharedMemory* g_shared_memory = nullptr;
 static std::map<CUdeviceptr, VMMAllocInfo> g_allocations_vmm;
 
 int userfault_fd = -1;
 pid_t g_dedup_pid = -1;
 std::mutex g_mutex; 
-size_t g_total_allocated = 0;
 size_t g_current_allocated = 0;
 size_t g_saved_memory = 0; 
 size_t g_saved_memory_print_threshold = 500 * 1024 * 1024;

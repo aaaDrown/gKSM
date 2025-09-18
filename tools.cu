@@ -27,33 +27,6 @@ std::string format_bytes(size_t bytes) {
     return std::string(buffer);
 }
 
-// 线程控制变量
-static std::atomic<bool> g_monitor_running(true);
-
-// 监控线程函数
-void monitor_thread_func() {
-    // while (g_monitor_running) {
-    //     std::this_thread::sleep_for(std::chrono::seconds(5));
-        
-    //     printf("\n==== CUDA-HOOK API TIMING SUMMARY ====\n");
-    //     printf("%-32s %12s %12s %12s\n", "API", "calls", "total(ms)", "avg(us)");
-    //     for (int i = 0; i < API_COUNT; ++i) {
-    //         // 使用acquire内存序确保看到最新的更新
-    //         uint64_t calls = g_api_stats[i].calls.load(std::memory_order_acquire);
-    //         uint64_t total_ns = g_api_stats[i].total_ns.load(std::memory_order_acquire);
-    //         if (calls == 0) continue;
-    //         double total_ms = double(total_ns) / 1e6;
-    //         double avg_us = double(total_ns) / double(calls) / 1e3;
-    //         printf("%-32s %12llu %12.3f %12.3f\n",
-    //                g_api_names[i],
-    //                (unsigned long long)calls,
-    //                total_ms,
-    //                avg_us);
-    //     }
-    //     printf("======================================\n");
-    // }
-}
-
 ////////////////////////////////////////////////
 // sha256
 ////////////////////////////////////////////////
@@ -162,63 +135,6 @@ __global__ void gpu_hash_kernel_single(
     }
 }
 
-// GPU内核：批量页面哈希计算
-__global__ void gpu_hash_kernel_batch(
-    const uint8_t* __restrict__ pages,
-    size_t page_size,
-    size_t num_pages,
-    uint64_t* results)
-{
-    const int page_idx = blockIdx.x;
-    if (page_idx >= num_pages) return;
-    
-    const uint8_t* data = pages + page_idx * page_size;
-    const int tid = threadIdx.x;
-    const int chunk_size = 16;
-    const uint64_t base_offset = tid * chunk_size;
-    
-    uint64_t acc = PRIME64_5;
-
-    if (base_offset < page_size) {
-        const uint64_t* ptr = reinterpret_cast<const uint64_t*>(data + base_offset);
-        const uint64_t v1 = ptr[0];
-        const uint64_t v2 = ptr[1];
-
-        acc += PRIME64_1 * v1;
-        acc = ((acc << 31) | (acc >> 33)) * PRIME64_2;
-        acc += PRIME64_1 * v2;
-        acc = ((acc << 31) | (acc >> 33)) * PRIME64_2;
-    }
-
-    // Warp级归约
-    for (int offset = 16; offset > 0; offset >>= 1) {
-        acc ^= __shfl_down_sync(0xFFFFFFFF, acc, offset);
-    }
-
-    // Block级归约
-    __shared__ uint64_t warp_results[32];
-    if (tid % 32 == 0) {
-        warp_results[tid / 32] = acc;
-    }
-    __syncthreads();
-
-    if (tid == 0) {
-        uint64_t final_acc = PRIME64_5;
-        for (int i = 0; i < blockDim.x / 32; i++) {
-            final_acc ^= warp_results[i];
-            final_acc = ((final_acc << 31) | (final_acc >> 33)) * PRIME64_1;
-        }
-        
-        final_acc ^= final_acc >> 33;
-        final_acc *= PRIME64_2;
-        final_acc ^= final_acc >> 29;
-        final_acc *= PRIME64_3;
-        final_acc ^= final_acc >> 32;
-        
-        results[page_idx] = final_acc;
-    }
-}
-
 std::string gpu_fast_hash_single(unsigned long long d_data, size_t size) {
 
     uint64_t* d_result = nullptr;
@@ -246,49 +162,6 @@ std::string gpu_fast_hash_single(unsigned long long d_data, size_t size) {
     snprintf(hex_str, sizeof(hex_str), "%016lx", h_result);
     return std::string(hex_str, 16);
 }
-
-void gpu_fast_hash_batch(
-    const void** pages,
-    size_t page_size,
-    size_t num_pages,
-    uint64_t* results)
-{
-    uint8_t* d_pages = nullptr;
-    uint64_t* d_results = nullptr;
-    
-    cudaMalloc(&d_pages, num_pages * page_size);
-    cudaMalloc(&d_results, num_pages * sizeof(uint64_t));
-    
-    // 拷贝数据到设备 (优化：异步拷贝)
-    for (size_t i = 0; i < num_pages; ++i) {
-        cudaMemcpy(
-            d_pages + i * page_size,
-            pages[i],
-            page_size,
-            cudaMemcpyHostToDevice
-        );
-    }
-    
-    // 计算线程块大小 (每页256个线程)
-    const int threads_per_page = 256; 
-    dim3 blocks(num_pages);
-    dim3 threads(threads_per_page);
-
-    gpu_hash_kernel_batch<<<blocks, threads>>>(
-        d_pages, page_size, num_pages, d_results
-    );
-    
-    cudaMemcpy(
-        results,
-        d_results,
-        num_pages * sizeof(uint64_t),
-        cudaMemcpyDeviceToHost
-    );
-
-    cudaFree(d_pages);
-    cudaFree(d_results);
-}
-
 
 ////////////////////////////////////////////////
 // XXH64
