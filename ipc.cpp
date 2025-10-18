@@ -179,7 +179,7 @@ bool ipc_transfer_ownership(pid_t new_owner_pid, const IpcRequest* req, int shar
 }
 
 bool ipc_send_dedup_request(pid_t target_pid, unsigned long long va, const char* hash) {
-    printf("gsh in ipc_send_dedup_request, va=%lx, hash=%s\n", va, hash);
+    // printf("gsh in ipc_send_dedup_request, va=%lx, hash=%s\n", va, hash);
     // 获取目标进程的socket路径
     char sock_path[108];
     snprintf(sock_path, sizeof(sock_path), "/tmp/cuda_dedup_%d.sock", target_pid);

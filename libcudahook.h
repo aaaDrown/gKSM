@@ -14,12 +14,13 @@
 #include "tools.h"
 #include "ipc.h"
 
-const int MAX_DEDUPE_PAGES = 20480;
+const int MAX_DEDUPE_PAGES = 40960;
 #define CMD_START_USERFAULT _IOW('L', 1, unsigned long)
 #define CMD_UPDATE_PAGEFAULT _IOW('L', 4, unsigned long)
-#define MAX_SHARED_REFS 32
+#define MAX_SHARED_REFS 64
 #define MAX_MEMCPY_LIMIT 3
 #define DEDUP_DEVICE 0
+
 typedef int ShareableHandle;
 struct SharedPageInfo {
     char hash[HASH_SIZE];         
@@ -64,6 +65,10 @@ struct SharedMemory {
     int candidate_page_count;
     SharedPageInfo shared_pages[MAX_DEDUPE_PAGES];
     CandidatePageInfo candidate_pages[MAX_DEDUPE_PAGES]; 
+    
+    // 布隆过滤器
+    unsigned char bloom_filter[BLOOM_FILTER_SIZE];
+    int bloom_filter_initialized;
 };
 
 struct fault_info {

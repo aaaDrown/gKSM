@@ -1,4 +1,7 @@
 #include "tools.h"
+#include <vector>
+#include <string>
+#include <cstdio>
 
 std::string current_time() {
     char buffer[64];
@@ -136,44 +139,368 @@ __global__ void gpu_hash_kernel_single(
 }
 
 std::string gpu_fast_hash_single(unsigned long long d_data, size_t size) {
-
-    uint64_t* d_result = nullptr;
-    cudaMalloc(reinterpret_cast<void**>(&d_result), sizeof(uint64_t));
-    cudaMemset(d_result, 0, sizeof(uint64_t));
+    // 初始化XXH3 GPU内存池（只分配一次）
+    if (!g_memory_initialized_xxh3) {
+        cudaMalloc(reinterpret_cast<void**>(&g_d_result_xxh3), sizeof(uint64_t));
+        g_memory_initialized_xxh3 = true;
+    }
+    
+    // 初始化CUDA stream（只创建一次）
+    if (!g_hash_stream_initialized) {
+        cudaStreamCreate(&g_hash_stream);
+        g_hash_stream_initialized = true;
+    }
+    
+    // 需要cudaMemset，因为atomicAdd需要从0开始累加
+    cudaMemsetAsync(g_d_result_xxh3, 0, sizeof(uint64_t), g_hash_stream);
     
     const int threads_per_block = 256;
     
     const size_t bytes_per_block = threads_per_block * 16 * 16;  // 每个block处理256*256=65,536字节
     const int blocks = (size + bytes_per_block - 1) / bytes_per_block;
 
-    gpu_hash_kernel_single<<<blocks, threads_per_block>>>(
+    gpu_hash_kernel_single<<<blocks, threads_per_block, 0, g_hash_stream>>>(
         reinterpret_cast<const uint8_t*>(d_data), 
         size, 
-        d_result
+        g_d_result_xxh3
     );
-    
-    cudaDeviceSynchronize();
+
+    cudaStreamSynchronize(g_hash_stream);
     
     uint64_t h_result = 0;
-    cudaMemcpy(&h_result, d_result, sizeof(uint64_t), cudaMemcpyDeviceToHost);
-    cudaFree(d_result);
+    cudaMemcpyAsync(&h_result, g_d_result_xxh3, sizeof(uint64_t), cudaMemcpyDeviceToHost, g_hash_stream);
+    
+    cudaStreamSynchronize(g_hash_stream);
     
     char hex_str[17];
     snprintf(hex_str, sizeof(hex_str), "%016lx", h_result);
     return std::string(hex_str, 16);
 }
 
-////////////////////////////////////////////////
-// XXH64
-////////////////////////////////////////////////
-std::string fast_hash(const void* data, size_t size) {
-    XXH64_hash_t hash = XXH3_64bits(data, size);
-    std::ostringstream oss;
-    oss << std::hex << std::setfill('0') << std::setw(16) << hash;
-    return oss.str();
+// 修改后的GPU哈希kernel
+__global__ void gpu_hash_kernel_batch(
+    unsigned long long* __restrict__ d_pages,  // 现在这是GPU上的地址数组
+    size_t page_size,
+    size_t num_pages,
+    char* hash_strings)
+{
+    const int page_idx = blockIdx.x;
+    if (page_idx >= num_pages) return;
+
+    // 现在 d_pages 在 GPU 上，可以直接访问
+    unsigned long long page_addr = d_pages[page_idx];
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(page_addr);
+    
+    const int tid = threadIdx.x;
+    const int num_threads = blockDim.x;
+    const int chunk_size = 16;
+    const int chunks_per_thread = 16;  // 每批处理16个块
+    
+    extern __shared__ uint64_t s_acc[];
+    __shared__ uint64_t s_batch_results[32];  // 存储每个批次的结果（最多32个批次）
+    
+    // 计算总的批次数（类似 single 模式的多个 block）
+    const size_t bytes_per_batch = num_threads * chunks_per_thread * chunk_size;  // 256*16*16=65536
+    const int num_batches = (page_size + bytes_per_batch - 1) / bytes_per_batch;
+    
+    if (tid == 0) {
+        for (int i = 0; i < num_batches && i < 32; i++) {
+            s_batch_results[i] = 0;
+        }
+    }
+    __syncthreads();
+    
+    // 循环处理多个批次，模拟 single 模式的多个 block
+    for (int batch = 0; batch < num_batches; batch++) {
+        uint64_t acc = PRIME64_5;  // 每个批次独立的线程累加器
+        
+        // 计算当前批次中线程的起始位置
+        const size_t batch_base = batch * bytes_per_batch;
+        const size_t start_offset = batch_base + tid * chunks_per_thread * chunk_size;
+        
+        // 处理当前批次的16个数据块（与 single 模式每个 block 的逻辑一致）
+        for (int i = 0; i < chunks_per_thread; i++) {
+            const size_t base_offset = start_offset + i * chunk_size;
+            
+            // 边界检查：确保不会读取越界（与 single 模式完全一致）
+            if (base_offset < page_size) {
+                uint64_t v1 = 0;
+                uint64_t v2 = 0;
+                
+                // 读取第一个64位值（与 single 模式完全一致）
+                if (base_offset + 8 <= page_size) {
+                    v1 = *reinterpret_cast<const uint64_t*>(data + base_offset);
+                }
+                
+                // 读取第二个64位值（与 single 模式完全一致）
+                if (base_offset + 16 <= page_size) {
+                    v2 = *reinterpret_cast<const uint64_t*>(data + base_offset + 8);
+                }
+                
+                // 避免零值影响哈希
+                if (v1 == 0) v1 = 1;
+                if (v2 == 0) v2 = 1;
+                
+                // 局部哈希计算（与 single 模式完全一致）
+                uint64_t local_acc = PRIME64_5;
+                local_acc += PRIME64_1 * v1;
+                local_acc = (local_acc << 31) | (local_acc >> 33);
+                local_acc *= PRIME64_2;
+                local_acc += PRIME64_1 * v2;
+                local_acc = (local_acc << 31) | (local_acc >> 33);
+                local_acc *= PRIME64_2;
+                
+                // 合并到线程累加器（与 single 模式完全一致）
+                acc ^= local_acc;
+                acc = acc * PRIME64_1 + PRIME64_4;
+            }
+        }
+        
+        // 批次内归约（与 single 模式的 block 内归约一致）
+        s_acc[tid] = acc;
+        __syncthreads();
+        
+        for (int s = num_threads / 2; s > 0; s >>= 1) {
+            if (tid < s) {
+                s_acc[tid] ^= s_acc[tid + s];
+            }
+            __syncthreads();
+        }
+        
+        // 对该批次做最终混合，并累加到批次结果（模拟 atomicAdd）
+        if (tid == 0) {
+            uint64_t batch_acc = s_acc[0];
+            
+            // 最终混合（与 single 模式完全一致）
+            batch_acc ^= batch_acc >> 33;
+            batch_acc *= PRIME64_2;
+            batch_acc ^= batch_acc >> 29;
+            batch_acc *= PRIME64_3;
+            batch_acc ^= batch_acc >> 32;
+            
+            // 累加该批次结果（模拟 atomicAdd）
+            s_batch_results[batch] = batch_acc;
+        }
+        __syncthreads();
+    }
+    
+    // 汇总所有批次的结果（模拟 single 模式的多个 block 通过 atomicAdd 累加）
+    if (tid == 0) {
+        uint64_t final_acc = 0;
+        for (int i = 0; i < num_batches; i++) {
+            final_acc += s_batch_results[i];  // 直接相加，与 atomicAdd 效果一致
+        }
+        
+        // 转换为十六进制字符串
+        char* hash_str = hash_strings + page_idx * 16;
+        const char hex_chars[] = "0123456789abcdef";
+        
+        for (int i = 0; i < 16; i++) {
+            int nibble = (final_acc >> (60 - i * 4)) & 0xF;
+            hash_str[i] = hex_chars[nibble];
+        }
+    }
 }
 
+std::vector<std::string> gpu_fast_hash_batch(
+    unsigned long long* h_pages,  
+    size_t page_size, 
+    size_t num_pages) {
+    
+    // 初始化页面地址池（只分配一次）
+    const size_t default_pages_count = 64;
+    const size_t required_pages_size = num_pages * sizeof(unsigned long long);
+    
+    if (!g_d_pages_pool_initialized) {
+        cudaMalloc(&g_d_pages_pool, default_pages_count * sizeof(unsigned long long));
+        g_d_pages_pool_size = default_pages_count * sizeof(unsigned long long);
+        g_d_pages_pool_initialized = true;
+    }
+    
+    // 如果需要更多空间，则扩展内存池
+    if (required_pages_size > g_d_pages_pool_size) {
+        fprintf(stderr, "Expanding pages pool from %zu to %zu bytes\n", 
+                g_d_pages_pool_size, required_pages_size);
+        cudaFree(g_d_pages_pool);
+        cudaMalloc(&g_d_pages_pool, required_pages_size);
+        g_d_pages_pool_size = required_pages_size;
+    }
+    
+    // 复用内存池，拷贝页面地址到设备
+    cudaMemcpy(g_d_pages_pool, h_pages, required_pages_size, 
+               cudaMemcpyHostToDevice);
+    
+    const size_t default_pool_size = 64 * 16;  // 64个页面的哈希字符串
+    const size_t required_size = num_pages * 16;
+    
+    if (!g_hash_strings_pool_initialized) {
+        cudaMalloc(&g_d_hash_strings_pool, default_pool_size);
+        g_hash_strings_pool_size = default_pool_size;
+        g_hash_strings_pool_initialized = true;
+    }
+    
+    if (required_size > g_hash_strings_pool_size) {
+        fprintf(stderr, "Expanding hash strings pool from %zu to %zu\n", 
+                g_hash_strings_pool_size, required_size);
+        cudaFree(g_d_hash_strings_pool);
+        cudaMalloc(&g_d_hash_strings_pool, required_size);
+        g_hash_strings_pool_size = required_size;
+    }
+    
+    const int threads_per_block = 256;
+    const int blocks = num_pages;  // 每个block处理一个页面
+    const size_t shared_mem_size = threads_per_block * sizeof(uint64_t);
+    
+    gpu_hash_kernel_batch<<<blocks, threads_per_block, shared_mem_size>>>(
+        g_d_pages_pool,           
+        page_size, 
+        num_pages, 
+        g_d_hash_strings_pool
+    );
+    
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Kernel launch failed: %s\n", cudaGetErrorString(err));
+        throw std::runtime_error("GPU kernel execution failed");
+    }
+    
+    cudaDeviceSynchronize();
+    
+    std::vector<char> h_hash_strings(required_size);
+    cudaMemcpy(h_hash_strings.data(), g_d_hash_strings_pool, required_size, 
+               cudaMemcpyDeviceToHost);
+    
+    std::vector<std::string> results;
+    results.reserve(num_pages);
+    for (size_t i = 0; i < num_pages; i++) {
+        results.emplace_back(h_hash_strings.data() + i * 16, 16);
+    }
+    
+    return results;
+}
 
+////////////////////////////////////////////////
+// 超快速哈希函数 - 用于预过滤
+////////////////////////////////////////////////
+
+// GPU版本的超快速哈希
+__global__ void gpu_ultra_fast_hash_kernel(
+    const uint8_t* __restrict__ data,
+    size_t size,
+    uint64_t* result)
+{
+    // const int tid = threadIdx.x;
+    // const int block_id = blockIdx.x;
+    // const int chunk_size = 8;
+    // const int chunks_per_thread = 16;  // 减少到16个块，与XXH64一致
+    
+    // const uint64_t start_offset = static_cast<uint64_t>(block_id) * blockDim.x * chunks_per_thread * chunk_size
+    //                             + static_cast<uint64_t>(tid) * chunks_per_thread * chunk_size;
+    
+    // uint64_t hash = 0x9E3779B97F4A7C15ULL;
+    
+    // for (int i = 0; i < chunks_per_thread; i++) {
+    //     const uint64_t base_offset = start_offset + i * chunk_size;
+        
+    //     if (base_offset + 8 <= size) {
+    //         uint64_t chunk = *reinterpret_cast<const uint64_t*>(data + base_offset);
+    //         hash ^= chunk;
+    //         hash = hash * 0x9E3779B97F4A7C15ULL;  // 简化：只做乘法，不做旋转
+    //     }
+    // }
+    
+    // // 使用共享内存进行block内归约
+    // __shared__ uint64_t shared_hash[256];
+    // shared_hash[tid] = hash;
+    // __syncthreads();
+    
+    // // 并行归约 (使用XOR)
+    // for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    //     if (tid < s) {
+    //         shared_hash[tid] ^= shared_hash[tid + s];
+    //     }
+    //     __syncthreads();
+    // }
+    
+    // if (tid == 0) {
+    //     atomicXor(reinterpret_cast<unsigned long long*>(result), shared_hash[0]);
+    // }
+}
+
+uint64_t gpu_ultra_fast_hash_single(unsigned long long d_data, size_t size) {
+    // 初始化GPU内存池（只分配一次）
+    if (!g_memory_initialized) {
+        cudaMalloc(reinterpret_cast<void**>(&g_d_result), sizeof(uint64_t));
+        g_memory_initialized = true;
+    }
+    
+    const int threads_per_block = 256;
+    const size_t bytes_per_block = threads_per_block * 16 * 8;  // 每个block处理256*128=32,768字节
+    const int blocks = (size + bytes_per_block - 1) / bytes_per_block;
+
+    gpu_ultra_fast_hash_kernel<<<blocks, threads_per_block>>>(
+        reinterpret_cast<const uint8_t*>(d_data), 
+        size, 
+        g_d_result
+    );
+    
+    cudaDeviceSynchronize();
+    
+    uint64_t h_result = 0;
+    cudaMemcpy(&h_result, g_d_result, sizeof(uint64_t), cudaMemcpyDeviceToHost);
+    
+    return h_result;
+}
+
+////////////////////////////////////////////////
+// 布隆过滤器实现
+////////////////////////////////////////////////
+
+// 生成多个哈希值用于布隆过滤器
+void generate_bloom_hashes(uint64_t input_hash, uint64_t* hashes, int count) {
+    uint64_t h1 = input_hash;
+    uint64_t h2 = input_hash * 0x9E3779B97F4A7C15ULL;
+    
+    for (int i = 0; i < count; i++) {
+        hashes[i] = (h1 + i * h2) % (BLOOM_FILTER_SIZE * 8);
+    }
+}
+
+// 检查布隆过滤器是否可能包含该哈希
+bool bloom_filter_might_contain(const unsigned char* bloom_filter, uint64_t fast_hash) {
+    uint64_t hashes[BLOOM_FILTER_HASH_COUNT];
+    generate_bloom_hashes(fast_hash, hashes, BLOOM_FILTER_HASH_COUNT);
+    
+    for (int i = 0; i < BLOOM_FILTER_HASH_COUNT; i++) {
+        uint64_t bit_index = hashes[i];
+        uint64_t byte_index = bit_index / 8;
+        uint64_t bit_offset = bit_index % 8;
+        
+        if (byte_index >= BLOOM_FILTER_SIZE) continue;
+        
+        if (!(bloom_filter[byte_index] & (1 << bit_offset))) {
+            return false; // 如果任何一个位为0，则肯定不存在
+        }
+    }
+    
+    return true; // 所有位都为1，可能存在
+}
+
+// 向布隆过滤器添加哈希
+void bloom_filter_add(unsigned char* bloom_filter, uint64_t fast_hash) {
+    uint64_t hashes[BLOOM_FILTER_HASH_COUNT];
+    generate_bloom_hashes(fast_hash, hashes, BLOOM_FILTER_HASH_COUNT);
+    
+    for (int i = 0; i < BLOOM_FILTER_HASH_COUNT; i++) {
+        uint64_t bit_index = hashes[i];
+        uint64_t byte_index = bit_index / 8;
+        uint64_t bit_offset = bit_index % 8;
+        
+        if (byte_index < BLOOM_FILTER_SIZE) {
+            bloom_filter[byte_index] |= (1 << bit_offset);
+        }
+    }
+}
 
 std::string trim(const std::string& str) {
     size_t start = str.find_first_not_of(" \t\n\r");

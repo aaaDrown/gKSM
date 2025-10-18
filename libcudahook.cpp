@@ -78,6 +78,7 @@ SharedPageInfo* find_page_by_hash(const char* hash) {
     return nullptr;
 }
 
+
 void* background_scan_thread(void* arg) {
     CUcontext cuda_ctx = (CUcontext)arg;
     CUresult res = cuCtxSetCurrent(cuda_ctx);
@@ -102,9 +103,8 @@ void* background_scan_thread(void* arg) {
         pages_deduped = 0;
         size_t hash_calculated = 0;
         size_t stable_candidates = 0;
+        size_t bloom_filtered = 0;  // 被布隆过滤器过滤掉的页面数
         
-        //TODO scan持有锁时间太长
-        // std::lock_guard<std::mutex> lock(g_mutex);
         uint64_t start = now_ns();
         std::vector<CUdeviceptr> to_scan;
         {
@@ -118,137 +118,310 @@ void* background_scan_thread(void* arg) {
         pages_scanned = to_scan.size();
         printf("[%s] Starting background deduplication scan #%zu scan size=%d (interval: %dms)\n", 
                current_time().c_str(), g_background_scans, pages_scanned, scan_interval_ms);
-        for (CUdeviceptr va : to_scan) {
-            LocalPageInfo& page_info = (*g_page_map)[va];
-            std::string current_hash_str;
-            {
-                ScopedTimer t_hook(API_HASH_XXH64_GPU); 
-                current_hash_str = gpu_fast_hash_single(va, g_page_size);
-            }
-            const char* current_hash = current_hash_str.c_str();
-            hash_calculated++;
-            
-            if (current_hash[0] == '\0') continue;
-            
-            if (page_info.hash[0] == '\0') {
-                strncpy(page_info.prev_hash, current_hash, HASH_SIZE);
-            } else {
-                strncpy(page_info.prev_hash, page_info.hash, HASH_SIZE);
-            }
-            strncpy(page_info.hash, current_hash, HASH_SIZE);
+        
+        const size_t max_batch_size = g_hook_config.max_batch_size;
+        size_t cur = 0;
+        
+        while (cur < to_scan.size()) {
 
-            if (strncmp(page_info.prev_hash, page_info.hash, HASH_SIZE) == 0) {
-                page_info.unchanged_scans++;
+            size_t batch_size = std::min(max_batch_size, to_scan.size() - cur);
+            std::vector<CUdeviceptr> batch_pages(to_scan.begin() + cur, 
+                                                  to_scan.begin() + cur + batch_size);
+            
+            if (batch_pages.size() > 1) {
+                std::vector<unsigned long long> page_ptrs;
                 
-                if (page_info.unchanged_scans >= stable_threshold) {
-                    page_info.is_stable = true;
-                    stable_candidates++;
-                    SharedPageInfo* shared_page;
-                    pthread_mutex_lock(&g_shared_memory->mutex);
-                    {
-                        ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
-                        shared_page = find_page_by_hash(current_hash);
+                for (CUdeviceptr va : batch_pages) 
+                    page_ptrs.push_back(static_cast<unsigned long long>(va));
+                
+                
+                std::vector<std::string> batch_results;
+                {
+                    ScopedTimer t_hook(API_HASH_XXH64_GPU);
+                    batch_results = gpu_fast_hash_batch(page_ptrs.data(), g_page_size, batch_pages.size());
+                }
+                
+                for (size_t j = 0; j < batch_pages.size(); j++) {
+                    CUdeviceptr va = batch_pages[j];
+                    LocalPageInfo& page_info = (*g_page_map)[va];
+                    
+                    const char* current_hash = batch_results[j].c_str();
+                    // printf("in batch mode va=%lx current_hash=%s\n", va, current_hash);
+                    hash_calculated++;
+                    
+                    if (current_hash[0] == '\0') continue;
+                    
+                    if (page_info.hash[0] == '\0') {
+                        strncpy(page_info.prev_hash, current_hash, HASH_SIZE);
+                    } else {
+                        strncpy(page_info.prev_hash, page_info.hash, HASH_SIZE);
                     }
-                    pthread_mutex_unlock(&g_shared_memory->mutex);
-                    if (shared_page) {
-                        if (try_deduplicate_page(va, NULL, g_page_size, current_hash)) {
-                            page_info.is_deduped = true;
-                        } else 
-                            fprintf(stderr, "gsh in 1\n");
-                    } 
-                    else { // 查找候选页list尝试重删
-                        bool found_candidate = false;
-                        for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
-                            if (g_shared_memory->candidate_pages[i].valid && strncmp(g_shared_memory->candidate_pages[i].hash, current_hash, HASH_SIZE) == 0) {
-                                if (g_shared_memory->candidate_pages[i].pid == g_dedup_pid && g_shared_memory->candidate_pages[i].va == va)
-                                    continue;
-                                found_candidate = true;
-                                if (g_shared_memory->candidate_pages[i].pid == g_dedup_pid) {
-                                    if (try_deduplicate_page(va, NULL, g_page_size, current_hash) &&
-                                        try_deduplicate_page(g_shared_memory->candidate_pages[i].va, NULL, g_page_size, current_hash)) {
-                                        auto it = g_page_map->find(va);
-                                        if (it != g_page_map->end()) {
-                                            it->second.is_deduped = true;
-                                        }
-                                        it = g_page_map->find(g_shared_memory->candidate_pages[i].va);
-                                        if (it != g_page_map->end()) {
-                                            it->second.is_deduped = true;
-                                        }        
-                                        g_shared_memory->candidate_pages[i].valid = false;
-                                        g_shared_memory->candidate_page_count--;
-                                    }
-                                } else {
-                                    bool current_page_deduped = try_deduplicate_page(va, NULL, g_page_size, current_hash);
-                                    if (current_page_deduped) {
-                                        // 更新本地页面状态
-                                        // std::lock_guard<std::mutex> lock2(g_mutex);
-                                        auto it = g_page_map->find(va);
-                                        if (it != g_page_map->end()) {
-                                            it->second.is_deduped = true;
-                                        }
-                                        pid_t target_pid = g_shared_memory->candidate_pages[i].pid;
-                                        CUdeviceptr target_va = g_shared_memory->candidate_pages[i].va;
-                                        unsigned long long t = (unsigned long long)target_va;
-                                        // printf("ipc_send_dedup_request target_va=%lx, current_hash=%s\n", t, current_hash);
-                                        if (ipc_send_dedup_request(target_pid, t, current_hash)) {
-                                            g_shared_memory->candidate_pages[i].valid = false;
-                                            g_shared_memory->candidate_page_count--;
-                                        }
-                                    }
-                                }
-                                
-                                break;
+                    strncpy(page_info.hash, current_hash, HASH_SIZE);
+                    
+                    if (strncmp(page_info.prev_hash, page_info.hash, HASH_SIZE) == 0) {
+                        page_info.unchanged_scans++;
+                        
+                        if (page_info.unchanged_scans >= stable_threshold) {
+                            page_info.is_stable = true;
+                            stable_candidates++;
+                            SharedPageInfo* shared_page;
+                            pthread_mutex_lock(&g_shared_memory->mutex);
+                            {
+                                ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
+                                shared_page = find_page_by_hash(current_hash);
                             }
-                        }
-                        pthread_mutex_lock(&g_shared_memory->mutex);
-                        if (!found_candidate) {
-                            for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
-                                if (!g_shared_memory->candidate_pages[i].valid) {
-                                    g_shared_memory->candidate_pages[i].valid = true;
-                                    strncpy(g_shared_memory->candidate_pages[i].hash, current_hash, HASH_SIZE);
-                                    g_shared_memory->candidate_pages[i].pid = g_dedup_pid;
-                                    g_shared_memory->candidate_pages[i].va = va;
-                                    g_shared_memory->candidate_pages[i].unchanged_scans = page_info.unchanged_scans;
-                                    g_shared_memory->candidate_page_count++;
-                                    break;
+                            pthread_mutex_unlock(&g_shared_memory->mutex);
+                            if (shared_page) {
+                                if (try_deduplicate_page(va, NULL, g_page_size, current_hash)) {
+                                    page_info.is_deduped = true;
+                                } else {
+                                    fprintf(stderr, "try_deduplicate_page failed in scan mode\n");
                                 }
+                            } 
+                            else { // 查找候选页list尝试重删
+                                bool found_candidate = false;
+                                for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
+                                    if (g_shared_memory->candidate_pages[i].valid && strncmp(g_shared_memory->candidate_pages[i].hash, current_hash, HASH_SIZE) == 0) {
+                                        if (g_shared_memory->candidate_pages[i].pid == g_dedup_pid && g_shared_memory->candidate_pages[i].va == va)
+                                            continue;
+                                        found_candidate = true;
+                                        if (g_shared_memory->candidate_pages[i].pid == g_dedup_pid) {
+                                            if (try_deduplicate_page(va, NULL, g_page_size, current_hash) &&
+                                                try_deduplicate_page(g_shared_memory->candidate_pages[i].va, NULL, g_page_size, current_hash)) {
+                                                auto it = g_page_map->find(va);
+                                                if (it != g_page_map->end()) {
+                                                    it->second.is_deduped = true;
+                                                }
+                                                it = g_page_map->find(g_shared_memory->candidate_pages[i].va);
+                                                if (it != g_page_map->end()) {
+                                                    it->second.is_deduped = true;
+                                                }        
+                                                g_shared_memory->candidate_pages[i].valid = false;
+                                                g_shared_memory->candidate_page_count--;
+                                            }
+                                        } else {
+                                            bool current_page_deduped = try_deduplicate_page(va, NULL, g_page_size, current_hash);
+                                            if (current_page_deduped) {
+                                                // 更新本地页面状态
+                                                // std::lock_guard<std::mutex> lock2(g_mutex);
+                                                auto it = g_page_map->find(va);
+                                                if (it != g_page_map->end()) {
+                                                    it->second.is_deduped = true;
+                                                }
+                                                pid_t target_pid = g_shared_memory->candidate_pages[i].pid;
+                                                CUdeviceptr target_va = g_shared_memory->candidate_pages[i].va;
+                                                unsigned long long t = (unsigned long long)target_va;
+                                                // printf("ipc_send_dedup_request target_va=%lx, current_hash=%s\n", t, current_hash);
+                                                if (ipc_send_dedup_request(target_pid, t, current_hash)) {
+                                                    g_shared_memory->candidate_pages[i].valid = false;
+                                                    g_shared_memory->candidate_page_count--;
+                                                }
+                                            }
+                                        }
+                                        
+                                        break;
+                                    }
+                                }
+                                pthread_mutex_lock(&g_shared_memory->mutex);
+                                if (!found_candidate) {
+                                    for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
+                                        if (!g_shared_memory->candidate_pages[i].valid) {
+                                            g_shared_memory->candidate_pages[i].valid = true;
+                                            strncpy(g_shared_memory->candidate_pages[i].hash, current_hash, HASH_SIZE);
+                                            g_shared_memory->candidate_pages[i].pid = g_dedup_pid;
+                                            g_shared_memory->candidate_pages[i].va = va;
+                                            g_shared_memory->candidate_pages[i].unchanged_scans = page_info.unchanged_scans;
+                                            g_shared_memory->candidate_page_count++;
+                                            break;
+                                        }
+                                    }
+                                }
+                                pthread_mutex_unlock(&g_shared_memory->mutex);
+                            }
+
+                        }
+                    } else {
+                        page_info.unchanged_scans = 0;
+                        page_info.is_stable = false;
+                    
+                        pthread_mutex_lock(&g_shared_memory->mutex);
+                        for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
+                            if (g_shared_memory->candidate_pages[i].valid && 
+                                g_shared_memory->candidate_pages[i].va == va && g_shared_memory->candidate_pages[i].pid == g_dedup_pid) {
+                                g_shared_memory->candidate_pages[i].valid = false;
+                                g_shared_memory->candidate_page_count--;
+                                break;
                             }
                         }
                         pthread_mutex_unlock(&g_shared_memory->mutex);
                     }
-
                 }
+                
+                cur += batch_pages.size();
             } else {
-                page_info.unchanged_scans = 0;
-                page_info.is_stable = false;
-            
-                pthread_mutex_lock(&g_shared_memory->mutex);
-                for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
-                    if (g_shared_memory->candidate_pages[i].valid && 
-                        g_shared_memory->candidate_pages[i].va == va && g_shared_memory->candidate_pages[i].pid == g_dedup_pid) {
-                        g_shared_memory->candidate_pages[i].valid = false;
-                        g_shared_memory->candidate_page_count--;
-                        break;
-                    }
+                CUdeviceptr va = to_scan[cur];
+                LocalPageInfo& page_info = (*g_page_map)[va];
+                
+                // 第一级：计算快速哈希
+                // uint64_t fast_hash = 0;
+                // {
+                //     ScopedTimer t_hook(API_ULTRA_FAST_HASH_GPU);
+                //     fast_hash = gpu_ultra_fast_hash_single(va, g_page_size);
+                // }
+                // // 检查布隆过滤器，如果不存在则直接添加并跳过精确哈希
+                // bool bloom_might_contain = false;
+                // {
+                //     ScopedTimer t_hook(API_BLOOM_FILTER_CHECK);
+                //     pthread_mutex_lock(&g_shared_memory->mutex);
+                //     bloom_might_contain = bloom_filter_might_contain(g_shared_memory->bloom_filter, fast_hash);
+                    
+                //     if (!bloom_might_contain) {
+                //         // 布隆过滤器显示肯定不存在，添加这个页面到过滤器
+                //         bloom_filter_add(g_shared_memory->bloom_filter, fast_hash);
+                //     }
+                //     pthread_mutex_unlock(&g_shared_memory->mutex);
+                // }
+                
+                // if (!bloom_might_contain) {
+                //     // 第一次遇到这个快速哈希，跳过精确哈希计算
+                //     bloom_filtered++;
+                //     pages_scanned++;
+                //     continue;
+                // }
+                
+                // 第二级：计算精确哈希（只有布隆过滤器显示可能存在时才计算）
+                std::string current_hash_str;
+                {
+                    ScopedTimer t_hook(API_HASH_XXH64_GPU); 
+                    current_hash_str = gpu_fast_hash_single(va, g_page_size);
                 }
-                pthread_mutex_unlock(&g_shared_memory->mutex);
+                const char* current_hash = current_hash_str.c_str();
+                hash_calculated++;
+            
+                if (current_hash[0] == '\0') continue;
+                
+                if (page_info.hash[0] == '\0') {
+                    strncpy(page_info.prev_hash, current_hash, HASH_SIZE);
+                } else {
+                    strncpy(page_info.prev_hash, page_info.hash, HASH_SIZE);
+                }
+                strncpy(page_info.hash, current_hash, HASH_SIZE);
+
+                if (strncmp(page_info.prev_hash, page_info.hash, HASH_SIZE) == 0) {
+                    page_info.unchanged_scans++;
+                    
+                    if (page_info.unchanged_scans >= stable_threshold) {
+                        page_info.is_stable = true;
+                        stable_candidates++;
+                        SharedPageInfo* shared_page;
+                        pthread_mutex_lock(&g_shared_memory->mutex);
+                        {
+                            ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
+                            shared_page = find_page_by_hash(current_hash);
+                        }
+                        pthread_mutex_unlock(&g_shared_memory->mutex);
+                        if (shared_page) {
+                            if (try_deduplicate_page(va, NULL, g_page_size, current_hash)) {
+                                page_info.is_deduped = true;
+                            } else {
+                                fprintf(stderr, "try_deduplicate_page failed in scan mode\n");
+                            }
+                        } 
+                        else { // 查找候选页list尝试重删
+                            bool found_candidate = false;
+                            for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
+                                if (g_shared_memory->candidate_pages[i].valid && strncmp(g_shared_memory->candidate_pages[i].hash, current_hash, HASH_SIZE) == 0) {
+                                    if (g_shared_memory->candidate_pages[i].pid == g_dedup_pid && g_shared_memory->candidate_pages[i].va == va)
+                                        continue;
+                                    found_candidate = true;
+                                    if (g_shared_memory->candidate_pages[i].pid == g_dedup_pid) {
+                                        if (try_deduplicate_page(va, NULL, g_page_size, current_hash) &&
+                                            try_deduplicate_page(g_shared_memory->candidate_pages[i].va, NULL, g_page_size, current_hash)) {
+                                            auto it = g_page_map->find(va);
+                                            if (it != g_page_map->end()) {
+                                                it->second.is_deduped = true;
+                                            }
+                                            it = g_page_map->find(g_shared_memory->candidate_pages[i].va);
+                                            if (it != g_page_map->end()) {
+                                                it->second.is_deduped = true;
+                                            }        
+                                            g_shared_memory->candidate_pages[i].valid = false;
+                                            g_shared_memory->candidate_page_count--;
+                                        }
+                                    } else {
+                                        bool current_page_deduped = try_deduplicate_page(va, NULL, g_page_size, current_hash);
+                                        if (current_page_deduped) {
+                                            // 更新本地页面状态
+                                            auto it = g_page_map->find(va);
+                                            if (it != g_page_map->end()) {
+                                                it->second.is_deduped = true;
+                                            }
+                                            pid_t target_pid = g_shared_memory->candidate_pages[i].pid;
+                                            CUdeviceptr target_va = g_shared_memory->candidate_pages[i].va;
+                                            unsigned long long t = (unsigned long long)target_va;
+                                            // printf("ipc_send_dedup_request target_va=%lx, current_hash=%s\n", t, current_hash);
+                                            if (ipc_send_dedup_request(target_pid, t, current_hash)) {
+                                                g_shared_memory->candidate_pages[i].valid = false;
+                                                g_shared_memory->candidate_page_count--;
+                                            }
+                                        }
+                                    }
+                                    
+                                    break;
+                                }
+                            }
+                            pthread_mutex_lock(&g_shared_memory->mutex);
+                            if (!found_candidate) {
+                                for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
+                                    if (!g_shared_memory->candidate_pages[i].valid) {
+                                        g_shared_memory->candidate_pages[i].valid = true;
+                                        strncpy(g_shared_memory->candidate_pages[i].hash, current_hash, HASH_SIZE);
+                                        g_shared_memory->candidate_pages[i].pid = g_dedup_pid;
+                                        g_shared_memory->candidate_pages[i].va = va;
+                                        g_shared_memory->candidate_pages[i].unchanged_scans = page_info.unchanged_scans;
+                                        g_shared_memory->candidate_page_count++;
+                                        break;
+                                    }
+                                }
+                            }
+                            pthread_mutex_unlock(&g_shared_memory->mutex);
+                        }
+
+                    }
+                } else {
+                    page_info.unchanged_scans = 0;
+                    page_info.is_stable = false;
+                
+                    pthread_mutex_lock(&g_shared_memory->mutex);
+                    for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
+                        if (g_shared_memory->candidate_pages[i].valid && 
+                            g_shared_memory->candidate_pages[i].va == va && g_shared_memory->candidate_pages[i].pid == g_dedup_pid) {
+                            g_shared_memory->candidate_pages[i].valid = false;
+                            g_shared_memory->candidate_page_count--;
+                            break;
+                        }
+                    }
+                    pthread_mutex_unlock(&g_shared_memory->mutex);
+                }
+                cur++;
             }
         }
 
         if (pages_deduped == 0) {
             consecutive_no_dedup++;
-            scan_interval_ms = std::min(max_scan_interval_ms, scan_interval_ms * 2);
+            // scan_interval_ms = std::min(max_scan_interval_ms, scan_interval_ms * 2);
         } else {
             consecutive_no_dedup = 0;
             scan_interval_ms = initial_scan_interval_ms;
         }
         uint64_t dur = now_ns() - start;
         double total_ms = double(dur) / 1e6;
-        printf("[%s] Background scan completed. Page total: %d, Scanned: %zu, Hash calculated: %zu, "
+        printf("[%s] Background scan completed. Page total: %d, Scanned: %zu, Bloom filtered: %zu, Hash calculated: %zu, "
                "Stable candidates: %zu, Deduped: %zu, New interval: %dms, total_ms: %.3f\n",
                current_time().c_str(), 
                g_page_map->size(),
                pages_scanned, 
+               bloom_filtered,
                hash_calculated,
                stable_candidates,
                pages_deduped,
@@ -822,7 +995,12 @@ void init_shared_memory() {
             memset(&g_shared_memory->shared_pages[i], 0, sizeof(SharedPageInfo));
             memset(&g_shared_memory->candidate_pages[i], 0, sizeof(CandidatePageInfo));
         }
-        printf("Shared memory initialized by first process\n");
+        
+        // 初始化布隆过滤器
+        memset(g_shared_memory->bloom_filter, 0, BLOOM_FILTER_SIZE);
+        g_shared_memory->bloom_filter_initialized = 1;
+        
+        printf("Shared memory initialized by first process (with bloom filter)\n");
     } else {
         printf("Attached to existing shared memory\n");
     }
@@ -906,8 +1084,15 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
     }
     const char* hash = hash_str.c_str();
     if (current_hash != NULL) {
-        if (strcmp(current_hash, hash) != 0) 
+        if (strcmp(current_hash, hash) != 0) {
+            printf("[%s] hash not true in try_deduplicate_page(va=0x%llx, size=%s, current_hash=%s, hash=%s)\n", 
+                current_time().c_str(), 
+                (unsigned long long)va,
+                format_bytes(size).c_str(),
+                current_hash,
+                hash);
             return false;
+        }   
     }
 
     auto cur_page_it = g_page_map->find(va);
@@ -931,14 +1116,13 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
         shared_page = find_page_by_hash(hash);
     }
 
-    // TODO 通知的间隙可能hash该掉了，导致找不到owner_va
-    printf("[%s] try_deduplicate_page(va=0x%llx, size=%s, owner_va=%llx, current_hash=%s, hash=%s)\n", 
-        current_time().c_str(), 
-        (unsigned long long)va,
-        format_bytes(size).c_str(),
-        shared_page != NULL ? shared_page->owner_va : NULL, 
-        current_hash,
-        hash);
+    // printf("[%s] try_deduplicate_page(va=0x%llx, size=%s, owner_va=%llx, current_hash=%s, hash=%s)\n", 
+    //     current_time().c_str(), 
+    //     (unsigned long long)va,
+    //     format_bytes(size).c_str(),
+    //     shared_page != NULL ? shared_page->owner_va : NULL, 
+    //     current_hash,
+    //     hash);
 
     if (shared_page) {
         if (shared_page->owner_pid == g_dedup_pid && shared_page->owner_va == va) {
@@ -1003,7 +1187,7 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
         }
 
         if(cuCtxSynchronize() != CUDA_SUCCESS) {
-            printf("gsh\n");
+            fprintf(stderr, "cuCtxSynchronize failed in try_deduplicate_page\n");
         }
         CUmemAccessDesc accessDesc;
         memset(&accessDesc, 0, sizeof(accessDesc));
