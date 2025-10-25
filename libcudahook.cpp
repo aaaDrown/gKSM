@@ -17,7 +17,7 @@ static CUresult( * orig_cuMemFree)(CUdeviceptr dptr) = NULL;
 DECLARE_ORIG_FUNC(cuGetProcAddress);
 DECLARE_ORIG_FUNC(cuGetProcAddress_v2);
 // DECLARE_ORIG_FUNC(cuInit);
-
+// cudaMalloc  cudaMemcpy
 // VMM API函数声明
 DECLARE_ORIG_FUNC(cuMemCreate); 
 DECLARE_ORIG_FUNC(cuMemAddressReserve);
@@ -96,7 +96,7 @@ void* background_scan_thread(void* arg) {
     usleep(g_hook_config.boot_scan_interval_ms * 1000);
     while (g_background_scanning) {
         usleep(scan_interval_ms * 1000);
-        ScopedTimer t_hook(API_BACKGROUND_SCAN);
+        //ScopedTimer t_hook(API_BACKGROUND_SCAN);
         g_background_scans++;
         
         size_t pages_scanned = 0;
@@ -108,15 +108,19 @@ void* background_scan_thread(void* arg) {
         uint64_t start = now_ns();
         std::vector<CUdeviceptr> to_scan;
         {
+            const int max_scan_pages = g_hook_config.max_scan_pages;
             for (auto& page_item : *g_page_map) {
                 if (page_item.second.is_deduped == false) {
                     to_scan.push_back(page_item.first);
+                    if (max_scan_pages > 0 && to_scan.size() >= max_scan_pages) {
+                        break;
+                    }
                 }
             }
         }
         
         pages_scanned = to_scan.size();
-        printf("[%s] Starting background deduplication scan #%zu scan size=%d (interval: %dms)\n", 
+        printf("[%s] Starting background deduplication scan #%zu scan size=%zu (interval: %dms)\n", 
                current_time().c_str(), g_background_scans, pages_scanned, scan_interval_ms);
         
         const size_t max_batch_size = g_hook_config.max_batch_size;
@@ -134,10 +138,9 @@ void* background_scan_thread(void* arg) {
                 for (CUdeviceptr va : batch_pages) 
                     page_ptrs.push_back(static_cast<unsigned long long>(va));
                 
-                
                 std::vector<std::string> batch_results;
                 {
-                    ScopedTimer t_hook(API_HASH_XXH64_GPU);
+                    ScopedTimer t_hook(API_HASH_XXH64_GPU_BATCH);
                     batch_results = gpu_fast_hash_batch(page_ptrs.data(), g_page_size, batch_pages.size());
                 }
                 
@@ -150,6 +153,15 @@ void* background_scan_thread(void* arg) {
                     hash_calculated++;
                     
                     if (current_hash[0] == '\0') continue;
+
+                    // 跳过哈希值为全'0'的情况
+                    {
+                        bool all_zero = true;
+                        for (int k = 0; k < HASH_SIZE - 1 && current_hash[k] != '\0'; ++k) {
+                            if (current_hash[k] != '0') { all_zero = false; break; }
+                        }
+                        if (all_zero) continue;
+                    }
                     
                     if (page_info.hash[0] == '\0') {
                         strncpy(page_info.prev_hash, current_hash, HASH_SIZE);
@@ -165,12 +177,12 @@ void* background_scan_thread(void* arg) {
                             page_info.is_stable = true;
                             stable_candidates++;
                             SharedPageInfo* shared_page;
-                            pthread_mutex_lock(&g_shared_memory->mutex);
+                            // pthread_mutex_lock(&g_shared_memory->mutex);
                             {
-                                ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
+                                //ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
                                 shared_page = find_page_by_hash(current_hash);
                             }
-                            pthread_mutex_unlock(&g_shared_memory->mutex);
+                            // pthread_mutex_unlock(&g_shared_memory->mutex);
                             if (shared_page) {
                                 if (try_deduplicate_page(va, NULL, g_page_size, current_hash)) {
                                     page_info.is_deduped = true;
@@ -202,8 +214,6 @@ void* background_scan_thread(void* arg) {
                                         } else {
                                             bool current_page_deduped = try_deduplicate_page(va, NULL, g_page_size, current_hash);
                                             if (current_page_deduped) {
-                                                // 更新本地页面状态
-                                                // std::lock_guard<std::mutex> lock2(g_mutex);
                                                 auto it = g_page_map->find(va);
                                                 if (it != g_page_map->end()) {
                                                     it->second.is_deduped = true;
@@ -222,7 +232,7 @@ void* background_scan_thread(void* arg) {
                                         break;
                                     }
                                 }
-                                pthread_mutex_lock(&g_shared_memory->mutex);
+                                // pthread_mutex_lock(&g_shared_memory->mutex);
                                 if (!found_candidate) {
                                     for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
                                         if (!g_shared_memory->candidate_pages[i].valid) {
@@ -236,7 +246,7 @@ void* background_scan_thread(void* arg) {
                                         }
                                     }
                                 }
-                                pthread_mutex_unlock(&g_shared_memory->mutex);
+                                // pthread_mutex_unlock(&g_shared_memory->mutex);
                             }
 
                         }
@@ -244,7 +254,7 @@ void* background_scan_thread(void* arg) {
                         page_info.unchanged_scans = 0;
                         page_info.is_stable = false;
                     
-                        pthread_mutex_lock(&g_shared_memory->mutex);
+                        //pthread_mutex_lock(&g_shared_memory->mutex);
                         for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
                             if (g_shared_memory->candidate_pages[i].valid && 
                                 g_shared_memory->candidate_pages[i].va == va && g_shared_memory->candidate_pages[i].pid == g_dedup_pid) {
@@ -253,163 +263,17 @@ void* background_scan_thread(void* arg) {
                                 break;
                             }
                         }
-                        pthread_mutex_unlock(&g_shared_memory->mutex);
+                        //pthread_mutex_unlock(&g_shared_memory->mutex);
                     }
                 }
                 
                 cur += batch_pages.size();
-            } else {
-                CUdeviceptr va = to_scan[cur];
-                LocalPageInfo& page_info = (*g_page_map)[va];
-                
-                // 第一级：计算快速哈希
-                // uint64_t fast_hash = 0;
-                // {
-                //     ScopedTimer t_hook(API_ULTRA_FAST_HASH_GPU);
-                //     fast_hash = gpu_ultra_fast_hash_single(va, g_page_size);
-                // }
-                // // 检查布隆过滤器，如果不存在则直接添加并跳过精确哈希
-                // bool bloom_might_contain = false;
-                // {
-                //     ScopedTimer t_hook(API_BLOOM_FILTER_CHECK);
-                //     pthread_mutex_lock(&g_shared_memory->mutex);
-                //     bloom_might_contain = bloom_filter_might_contain(g_shared_memory->bloom_filter, fast_hash);
-                    
-                //     if (!bloom_might_contain) {
-                //         // 布隆过滤器显示肯定不存在，添加这个页面到过滤器
-                //         bloom_filter_add(g_shared_memory->bloom_filter, fast_hash);
-                //     }
-                //     pthread_mutex_unlock(&g_shared_memory->mutex);
-                // }
-                
-                // if (!bloom_might_contain) {
-                //     // 第一次遇到这个快速哈希，跳过精确哈希计算
-                //     bloom_filtered++;
-                //     pages_scanned++;
-                //     continue;
-                // }
-                
-                // 第二级：计算精确哈希（只有布隆过滤器显示可能存在时才计算）
-                std::string current_hash_str;
-                {
-                    ScopedTimer t_hook(API_HASH_XXH64_GPU); 
-                    current_hash_str = gpu_fast_hash_single(va, g_page_size);
-                }
-                const char* current_hash = current_hash_str.c_str();
-                hash_calculated++;
-            
-                if (current_hash[0] == '\0') continue;
-                
-                if (page_info.hash[0] == '\0') {
-                    strncpy(page_info.prev_hash, current_hash, HASH_SIZE);
-                } else {
-                    strncpy(page_info.prev_hash, page_info.hash, HASH_SIZE);
-                }
-                strncpy(page_info.hash, current_hash, HASH_SIZE);
-
-                if (strncmp(page_info.prev_hash, page_info.hash, HASH_SIZE) == 0) {
-                    page_info.unchanged_scans++;
-                    
-                    if (page_info.unchanged_scans >= stable_threshold) {
-                        page_info.is_stable = true;
-                        stable_candidates++;
-                        SharedPageInfo* shared_page;
-                        pthread_mutex_lock(&g_shared_memory->mutex);
-                        {
-                            ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
-                            shared_page = find_page_by_hash(current_hash);
-                        }
-                        pthread_mutex_unlock(&g_shared_memory->mutex);
-                        if (shared_page) {
-                            if (try_deduplicate_page(va, NULL, g_page_size, current_hash)) {
-                                page_info.is_deduped = true;
-                            } else {
-                                fprintf(stderr, "try_deduplicate_page failed in scan mode\n");
-                            }
-                        } 
-                        else { // 查找候选页list尝试重删
-                            bool found_candidate = false;
-                            for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
-                                if (g_shared_memory->candidate_pages[i].valid && strncmp(g_shared_memory->candidate_pages[i].hash, current_hash, HASH_SIZE) == 0) {
-                                    if (g_shared_memory->candidate_pages[i].pid == g_dedup_pid && g_shared_memory->candidate_pages[i].va == va)
-                                        continue;
-                                    found_candidate = true;
-                                    if (g_shared_memory->candidate_pages[i].pid == g_dedup_pid) {
-                                        if (try_deduplicate_page(va, NULL, g_page_size, current_hash) &&
-                                            try_deduplicate_page(g_shared_memory->candidate_pages[i].va, NULL, g_page_size, current_hash)) {
-                                            auto it = g_page_map->find(va);
-                                            if (it != g_page_map->end()) {
-                                                it->second.is_deduped = true;
-                                            }
-                                            it = g_page_map->find(g_shared_memory->candidate_pages[i].va);
-                                            if (it != g_page_map->end()) {
-                                                it->second.is_deduped = true;
-                                            }        
-                                            g_shared_memory->candidate_pages[i].valid = false;
-                                            g_shared_memory->candidate_page_count--;
-                                        }
-                                    } else {
-                                        bool current_page_deduped = try_deduplicate_page(va, NULL, g_page_size, current_hash);
-                                        if (current_page_deduped) {
-                                            // 更新本地页面状态
-                                            auto it = g_page_map->find(va);
-                                            if (it != g_page_map->end()) {
-                                                it->second.is_deduped = true;
-                                            }
-                                            pid_t target_pid = g_shared_memory->candidate_pages[i].pid;
-                                            CUdeviceptr target_va = g_shared_memory->candidate_pages[i].va;
-                                            unsigned long long t = (unsigned long long)target_va;
-                                            // printf("ipc_send_dedup_request target_va=%lx, current_hash=%s\n", t, current_hash);
-                                            if (ipc_send_dedup_request(target_pid, t, current_hash)) {
-                                                g_shared_memory->candidate_pages[i].valid = false;
-                                                g_shared_memory->candidate_page_count--;
-                                            }
-                                        }
-                                    }
-                                    
-                                    break;
-                                }
-                            }
-                            pthread_mutex_lock(&g_shared_memory->mutex);
-                            if (!found_candidate) {
-                                for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
-                                    if (!g_shared_memory->candidate_pages[i].valid) {
-                                        g_shared_memory->candidate_pages[i].valid = true;
-                                        strncpy(g_shared_memory->candidate_pages[i].hash, current_hash, HASH_SIZE);
-                                        g_shared_memory->candidate_pages[i].pid = g_dedup_pid;
-                                        g_shared_memory->candidate_pages[i].va = va;
-                                        g_shared_memory->candidate_pages[i].unchanged_scans = page_info.unchanged_scans;
-                                        g_shared_memory->candidate_page_count++;
-                                        break;
-                                    }
-                                }
-                            }
-                            pthread_mutex_unlock(&g_shared_memory->mutex);
-                        }
-
-                    }
-                } else {
-                    page_info.unchanged_scans = 0;
-                    page_info.is_stable = false;
-                
-                    pthread_mutex_lock(&g_shared_memory->mutex);
-                    for (int i = 0; i < MAX_DEDUPE_PAGES; i++) {
-                        if (g_shared_memory->candidate_pages[i].valid && 
-                            g_shared_memory->candidate_pages[i].va == va && g_shared_memory->candidate_pages[i].pid == g_dedup_pid) {
-                            g_shared_memory->candidate_pages[i].valid = false;
-                            g_shared_memory->candidate_page_count--;
-                            break;
-                        }
-                    }
-                    pthread_mutex_unlock(&g_shared_memory->mutex);
-                }
-                cur++;
-            }
+            } 
         }
 
         if (pages_deduped == 0) {
             consecutive_no_dedup++;
-            // scan_interval_ms = std::min(max_scan_interval_ms, scan_interval_ms * 2);
+            scan_interval_ms = std::min(max_scan_interval_ms, scan_interval_ms * 2);
         } else {
             consecutive_no_dedup = 0;
             scan_interval_ms = initial_scan_interval_ms;
@@ -476,7 +340,7 @@ void* ipc_handler_thread(void* arg) {
                 
                 CUmemGenericAllocationHandle handle = 0;
                 {
-                    std::lock_guard<std::mutex> lock(g_mutex);
+                    //std::lock_guard<std::mutex> lock(g_mutex);
                     for (const auto& kv : *g_page_map) {
                         if (strncmp(kv.second.hash, hash, HASH_SIZE) == 0) {
                             handle = kv.second.handle;
@@ -515,12 +379,12 @@ void* ipc_handler_thread(void* arg) {
 
                 IpcResponse resp = {0};
                 SharedPageInfo* page;
-                pthread_mutex_lock(&g_shared_memory->mutex);
+                // pthread_mutex_lock(&g_shared_memory->mutex);
                 {
-                    ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
+                    //ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
                     page = find_page_by_hash(req.hash);
                 }
-                pthread_mutex_unlock(&g_shared_memory->mutex);
+                // pthread_mutex_unlock(&g_shared_memory->mutex);
                 if (page && page->owner_pid == req.src_pid) {
                     auto page_it = g_page_map->find(page->owner_va);
                     if (page_it != g_page_map->end()) {
@@ -544,7 +408,7 @@ void* ipc_handler_thread(void* arg) {
                 bool success = try_deduplicate_page((CUdeviceptr)req.va, NULL, g_page_size, req.hash);
                 
                 if (success) {
-                    std::lock_guard<std::mutex> lock(g_mutex);
+                    //std::lock_guard<std::mutex> lock(g_mutex);
                     auto it = g_page_map->find((CUdeviceptr)req.va);
                     if (it != g_page_map->end()) {
                         it->second.is_deduped = true;
@@ -651,13 +515,57 @@ void* userfault_handler_thread(void* arg) {
         LocalPageInfo& fault_page = it->second;
         switch (info.fault_type) {
             case 0: { //处理延迟分配
+                CUmemAllocationProp prop;
+                memset(&prop, 0, sizeof(prop));
+                prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+                prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+                prop.location.id = DEDUP_DEVICE;
+                prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+                CUmemGenericAllocationHandle handle;
+
+                {
+                    //ScopedTimer t_hook_create(API_CU_MEM_CREATE_HOOK);
+                    res = cuMemCreate(&handle, g_page_size, &prop, 0);
+                }
+                if (res != CUDA_SUCCESS) {
+                    fprintf(stderr, "cuMemCreate failed: %d\n", res);
+                    break;
+                }
+        
+                {
+                    //ScopedTimer t_orig_map(API_CU_MEM_MAP_ORIG);
+                    res = orig_cuMemMap(base_addr, g_page_size, 0, handle, 0);
+                }
+                if (res != CUDA_SUCCESS) {
+                    fprintf(stderr, "cuMemMap failed: %d\n", res);
+                    orig_cuMemRelease(handle);
+                    break;
+                }
+
+                CUmemAccessDesc accessDesc = {};
+                accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+                accessDesc.location.id = DEDUP_DEVICE;
+                accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+                
+                {
+                    //ScopedTimer t_orig_setaccess(API_CU_MEM_SETACCESS_ORIG);
+                    res = orig_cuMemSetAccess(base_addr, g_page_size, &accessDesc, 1);
+                }
+                if (res != CUDA_SUCCESS) {
+                    fprintf(stderr, "cuMemSetAccess failed: %d\n", res);
+                    orig_cuMemUnmap(base_addr, g_page_size);
+                    break;
+                }
+
+                fault_page.handle = handle;
+                
                 write(fd, "done", 4);
                 break;
             }
             case 3: { //处理写时复制
-                printf("[%s] get fault_addr:0x%lx  base_addr:0x%lx  cur_pid:%d  fault_type:%d  fault_page.hash:%s\n", current_time().c_str(), fault_addr, base_addr, cur_pid, info.fault_type, fault_page.hash);
+                // printf("[%s] get fault_addr:0x%lx  base_addr:0x%lx  cur_pid:%d  fault_type:%d  fault_page.hash:%s\n", current_time().c_str(), fault_addr, base_addr, cur_pid, info.fault_type, fault_page.hash);
                 {
-                    std::lock_guard<std::mutex> lock(g_mutex);
+                    // std::lock_guard<std::mutex> lock(g_mutex);
                     if (fault_page.pagefault_flag == true) {
                         ret = write(fd, "done", 4);
                         if (ret == -1) {
@@ -669,10 +577,10 @@ void* userfault_handler_thread(void* arg) {
                     fault_page.pagefault_flag = true;
                 }
 
-                ScopedTimer t_hook(API_USERFAULT_HANDLE);
-                pthread_mutex_lock(&g_shared_memory->mutex);
+                //ScopedTimer t_hook(API_USERFAULT_HANDLE);
+                // pthread_mutex_lock(&g_shared_memory->mutex);
                 {
-                    ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
+                    //ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
                     shared_page = find_page_by_hash(fault_page.hash);
                 }
 
@@ -878,7 +786,7 @@ void* userfault_handler_thread(void* arg) {
                         fault_page.is_exported = false;
                         g_saved_memory -= g_page_size;
                     }
-                    printf("[%s] CoW completed for fault_addr:0x%lx base_addr:0x%lx (Hash:%s)\n", current_time().c_str(), fault_addr, base_addr, shared_page->hash);
+                    // printf("[%s] CoW completed for fault_addr:0x%lx base_addr:0x%lx (Hash:%s)\n", current_time().c_str(), fault_addr, base_addr, shared_page->hash);
                 } else {
                     fprintf(stderr, "[%s] CoW shared page not found, fault_addr:0x%lx base_addr:0x%lx shared_page:%lx shared_page->hash:%s pid=%d\n", current_time().c_str(), fault_addr, base_addr, shared_page, shared_page->hash, g_dedup_pid);
                     CUmemAccessDesc accessDesc;
@@ -902,7 +810,7 @@ void* userfault_handler_thread(void* arg) {
                 fault_page.is_deduped = false;
                 fault_page.is_stable = false;
                 fault_page.unchanged_scans = 0;
-                pthread_mutex_unlock(&g_shared_memory->mutex);
+                // pthread_mutex_unlock(&g_shared_memory->mutex);
                 break;
             }
             default:
@@ -950,6 +858,9 @@ void init_background_scan() {
         } else {
             printf("Background deduplication thread started\n");
         }
+    } else {
+        g_background_scanning = false;
+        printf("Background deduplication scan is disabled (enable_background_scan = false)\n");
     }
 
 }
@@ -1059,27 +970,32 @@ void init_hook_api() {
 }
 
 bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const char* current_hash) {
-    ScopedTimer t_hook(API_TRY_DEDUPLICATE_PAGE); 
-    
-    //////////////////////////////////////////////////// xxh64
-    // std::string hash_str;
-    // {
-    //     ScopedTimer t_hook(API_HASH_XXH64); 
-    //     hash_str = fast_hash(data, size);
-    // }
-    // const char* hash = hash_str.c_str(); 
+    //ScopedTimer t_hook(API_TRY_DEDUPLICATE_PAGE); 
 
-    //////////////////////////////////////////////////// xxh64 gpu
-
-    int ret = ioctl(userfault_fd, CMD_UPDATE_PAGEFAULT, *(unsigned long*)&va);
-    if (ret == -1) {
-        fprintf(stderr, "ioctl CMD_UPDATE_PAGEFAULT failed\n");
-        exit(-1);
+    //为NULL的话那就只有模型参数，只读，不会写，没必要写到kernel里面
+    if (current_hash != NULL) {
+        update_pagefault_args args;
+        args.fault_type = UVM_FAULT_TYPE_WRITE;
+        args.page_addr = *(unsigned long*)&va;
+        args.num_pages = 1;
+        int ret = ioctl(userfault_fd, CMD_UPDATE_PAGEFAULT, (unsigned long)&args);
+        if (ret == -1) {
+            fprintf(stderr, "ioctl CMD_UPDATE_PAGEFAULT failed\n");
+            exit(-1);
+        }
     }
 
+    //////////////////////////////////////////////////// xxh64
+        // std::string hash_str;
+        // {
+        //     ScopedTimer t_hook(API_HASH_XXH64); 
+        //     hash_str = fast_hash(data, size);
+        // }
+        // const char* hash = hash_str.c_str(); 
+    //////////////////////////////////////////////////// xxh64 gpu
     std::string hash_str;
     {
-        ScopedTimer t_hook(API_HASH_XXH64_GPU); 
+        //ScopedTimer t_hook(API_HASH_XXH64_GPU); 
         hash_str = gpu_fast_hash_single(va, g_page_size);
     }
     const char* hash = hash_str.c_str();
@@ -1107,12 +1023,12 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
     if (cur_page.memcpy_cnt >= MAX_MEMCPY_LIMIT) 
         cur_page.is_stable = false;
     
-    pthread_mutex_lock(&g_shared_memory->mutex);
+    //pthread_mutex_lock(&g_shared_memory->mutex);
 
     SharedPageInfo* shared_page = nullptr;
     
     {
-        ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
+        //ScopedTimer t_hook(API_FIND_PAGE_BY_HASH); 
         shared_page = find_page_by_hash(hash);
     }
 
@@ -1143,13 +1059,13 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
             );
             
             if (shareable_fd < 0) {
-                pthread_mutex_unlock(&g_shared_memory->mutex);
+                //pthread_mutex_unlock(&g_shared_memory->mutex);
                 return false;
             }
 
             CUresult import_res;
             {
-                ScopedTimer t_hook(API_CU_MEM_IMPORT_ORIG); 
+                //ScopedTimer t_hook(API_CU_MEM_IMPORT_ORIG); 
                 import_res = orig_cuMemImportFromShareableHandle(
                     &imported_handle,
                     (void *)(uintptr_t)shareable_fd,
@@ -1162,47 +1078,44 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
                 const char* errorName, *errorString;
                 cuGetErrorName(import_res, &errorName);
                 cuGetErrorString(import_res, &errorString);
-                pthread_mutex_unlock(&g_shared_memory->mutex);
+                //pthread_mutex_unlock(&g_shared_memory->mutex);
                 return false;
             }
         }
         
         {
-            ScopedTimer t_hook(API_CU_MEM_UNMAP_ORIG); 
+            //ScopedTimer t_hook(API_CU_MEM_UNMAP_ORIG); 
             if (orig_cuMemUnmap(va, size) != CUDA_SUCCESS) {
                 orig_cuMemRelease(imported_handle);
-                pthread_mutex_unlock(&g_shared_memory->mutex);
+                //pthread_mutex_unlock(&g_shared_memory->mutex);
                 return false;
             }
         }
 
         {
-            ScopedTimer t_hook(API_CU_MEM_MAP_ORIG); 
+            //ScopedTimer t_hook(API_CU_MEM_MAP_ORIG); 
             if (orig_cuMemMap(va, size, 0, imported_handle, 0) != CUDA_SUCCESS) {
                 orig_cuMemMap(va, size, 0, cur_page.handle, 0);
                 orig_cuMemRelease(imported_handle);
-                pthread_mutex_unlock(&g_shared_memory->mutex);
+                //pthread_mutex_unlock(&g_shared_memory->mutex);
                 return false;
             }
         }
 
-        if(cuCtxSynchronize() != CUDA_SUCCESS) {
-            fprintf(stderr, "cuCtxSynchronize failed in try_deduplicate_page\n");
-        }
         CUmemAccessDesc accessDesc;
-        memset(&accessDesc, 0, sizeof(accessDesc));
+        // memset(&accessDesc, 0, sizeof(accessDesc));
         accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
         accessDesc.location.id = DEDUP_DEVICE;
         accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READ;
         {
             // printf("set access for va=%lx\n", va);
-            ScopedTimer t_hook(API_CU_MEM_SETACCESS_ORIG); 
+            //ScopedTimer t_hook(API_CU_MEM_SETACCESS_ORIG); 
             if (orig_cuMemSetAccess(va, size, &accessDesc, 1) != CUDA_SUCCESS) {
                 // 回滚操作
                 orig_cuMemUnmap(va, size);
                 orig_cuMemMap(va, size, 0, cur_page.handle, 0);
                 orig_cuMemRelease(imported_handle);
-                pthread_mutex_unlock(&g_shared_memory->mutex);
+                //pthread_mutex_unlock(&g_shared_memory->mutex);
                 return false;
             }
         }
@@ -1213,7 +1126,7 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
         strcpy(cur_page.hash,hash);
 
         {
-            ScopedTimer t_hook(API_CU_MEM_RELEASE_ORIG); 
+            //ScopedTimer t_hook(API_CU_MEM_RELEASE_ORIG); 
             orig_cuMemRelease(old_handle);
         }
 
@@ -1229,8 +1142,8 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
         shared_page->ref_count++;
 
         if (current_hash != NULL) {
-            printf("[%s] Dedup at VA: 0x%llx, Saved: %s, pid: %d, hash: %s\n",
-                current_time().c_str(),
+            printf("[] Dedup at VA: 0x%llx, Saved: %s, pid: %d, hash: %s\n",
+                // current_time().c_str(),
                 (unsigned long long)va,
                 format_bytes(g_saved_memory).c_str(),
                 getpid(),
@@ -1256,14 +1169,14 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
         accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READ;
         {
             // printf("set access for va=%lx\n", va);
-            ScopedTimer t_hook(API_CU_MEM_SETACCESS_ORIG); 
+            //ScopedTimer t_hook(API_CU_MEM_SETACCESS_ORIG); 
             if (orig_cuMemSetAccess(va, size, &accessDesc, 1) != CUDA_SUCCESS) {
                 return false;
             }
         }
 
         if (cur_page.is_exported == false) {
-            ScopedTimer t_hook(API_CU_MEM_EXPORT_ORIG); 
+            //ScopedTimer t_hook(API_CU_MEM_EXPORT_ORIG); 
             export_res = orig_cuMemExportToShareableHandle(
                 (void*)&shareable_handle,
                 cur_page.handle,
@@ -1282,7 +1195,7 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
                 
                 if (free_index == -1) {
                     fprintf(stderr, "Global dedupe page storage full!\n");
-                    pthread_mutex_unlock(&g_shared_memory->mutex);
+                    //pthread_mutex_unlock(&g_shared_memory->mutex);
                     return false;
                 }
                 
@@ -1321,7 +1234,7 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
             
             if (free_index == -1) {
                 fprintf(stderr, "Global dedupe page storage full!\n");
-                pthread_mutex_unlock(&g_shared_memory->mutex);
+                //pthread_mutex_unlock(&g_shared_memory->mutex);
                 return false;
             }
             
@@ -1351,7 +1264,7 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
             g_shared_memory->candidate_page_count--;
         }
     }
-    pthread_mutex_unlock(&g_shared_memory->mutex);
+    // pthread_mutex_unlock(&g_shared_memory->mutex);
     return true;
 }
 
@@ -1462,13 +1375,146 @@ CUresult CUDAAPI cuMemAlloc_v2(CUdeviceptr* dptr, size_t bytesize) {
     return CUDA_SUCCESS;
 }
 
+// CUresult CUDAAPI cuMemAlloc(CUdeviceptr* dptr, size_t bytesize) {
+//     ScopedTimer t_hook(API_CU_MEM_ALLOC_HOOK); 
+//     if (userfault_fd == -1) {
+//         printf("Initializing shared memory...\n");
+//         init_shared_memory();
+//         printf("Shared memory initialized at %p\n", (void*)g_shared_memory);
+        
+//         printf("Initializing userfault...\n");
+//         init_userfault();
+//         printf("userfault initialized\n");
+
+//         init_background_scan();
+//     }
+
+//     CUresult res = CUDA_ERROR_UNKNOWN;
+//     if(bytesize < g_page_size) {
+//         ScopedTimer t_hook(API_CU_MEM_ALLOC_ORIG); 
+//         res = orig_cuMemAlloc? 
+//                     orig_cuMemAlloc(dptr, bytesize) : 
+//                     CUDA_ERROR_NOT_INITIALIZED;
+//         if (res != CUDA_SUCCESS) 
+//             printf("hook in cuMemAlloc, res %d\n",res);
+        
+//         return res;
+//     }
+//     CUcontext ctx;    
+    
+//     CUmemAllocationProp prop;
+//     memset(&prop, 0, sizeof(prop));
+//     prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+//     prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+//     prop.location.id = DEDUP_DEVICE;
+//     prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+    
+//     size_t aligned_size = ((bytesize + g_page_size - 1) / g_page_size) * g_page_size;
+//     size_t num_pages = aligned_size / g_page_size;
+//     VMMAllocInfo alloc_info;
+//     alloc_info.aligned_size = aligned_size;
+    
+//     CUdeviceptr va;
+//     {
+//         ScopedTimer t_orig(API_CU_MEM_ADDRESS_RESERVE_ORIG);
+//         res = orig_cuMemAddressReserve(&va, aligned_size, 0, 0, 0);
+//     }
+//     if (res != CUDA_SUCCESS) {
+//         fprintf(stderr, "cuMemAddressReserve failed: %d\n", res);
+//         return res;
+//     }
+
+//     //////////////////////////////////////////////////
+//     // 延迟分配
+//     //////////////////////////////////////////////////
+//     update_pagefault_args args;
+//     args.fault_type = UVM_FAULT_TYPE_INVALID_PDE;
+//     args.page_addr = *(unsigned long*)&va;
+//     args.num_pages = num_pages;
+//     int ret = ioctl(userfault_fd, CMD_UPDATE_PAGEFAULT, (unsigned long)&args);
+
+//     for (size_t i = 0; i < num_pages; i++) {
+//         CUdeviceptr va_ptr = va + i * g_page_size;
+//         LocalPageInfo page;
+//         page.handle = 0;
+//         page.va = va_ptr;
+//         memset(page.hash, 0, HASH_SIZE);
+//         alloc_info.pages.push_back(page);
+//         (*g_page_map)[va_ptr] = page;
+//     }
+
+//     alloc_info.va = va;
+//     g_allocations_vmm[va] = alloc_info;
+//     return CUDA_SUCCESS;
+//     //////////////////////////////////////////////////
+//     // old
+//     //////////////////////////////////////////////////
+
+//     for (size_t i = 0; i < num_pages; i++) {
+//         CUmemGenericAllocationHandle handle;
+//         CUdeviceptr va_ptr = va + i * g_page_size;
+//         {
+//             ScopedTimer t_hook_create(API_CU_MEM_CREATE_HOOK);
+//             res = cuMemCreate(&handle, g_page_size, &prop, 0);
+//         }
+//         if (res != CUDA_SUCCESS) {
+//             fprintf(stderr, "cuMemCreate failed: %d\n", res);
+//             return res;
+//         }
+
+//         {
+//             ScopedTimer t_orig_map(API_CU_MEM_MAP_ORIG);
+//             res = orig_cuMemMap(va_ptr, g_page_size, 0, handle, 0);
+//         }
+//         if (res != CUDA_SUCCESS) {
+//             fprintf(stderr, "cuMemMap failed: %d\n", res);
+//             orig_cuMemRelease(handle);
+//             return res;
+//         }
+//         LocalPageInfo page;
+//         page.handle = handle;
+//         page.va = va_ptr;
+//         memset(page.hash, 0, HASH_SIZE);
+//         alloc_info.pages.push_back(page);
+//         (*g_page_map)[va_ptr] = page;
+//     }
+
+//     CUmemAccessDesc accessDesc = {};
+//     accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+//     accessDesc.location.id = DEDUP_DEVICE;
+//     accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    
+//     {
+//         ScopedTimer t_orig_setaccess(API_CU_MEM_SETACCESS_ORIG);
+//         res = orig_cuMemSetAccess(va, aligned_size, &accessDesc, 1);
+//     }
+//     if (res != CUDA_SUCCESS) {
+//         fprintf(stderr, "cuMemSetAccess failed: %d\n", res);
+//         orig_cuMemUnmap(va, aligned_size);
+//         return res;
+//     }
+
+//     alloc_info.va = va;
+//     g_allocations_vmm[va] = alloc_info;
+    
+//     *dptr = va;
+//     g_current_allocated += aligned_size;
+//     printf("[%s] cuMemAlloc(dptr=0x%llx, aligned_size=%s, g_current_allocated=%s)\n", 
+//         current_time().c_str(), 
+//         (unsigned long long)*dptr,
+//         format_bytes(aligned_size).c_str(),
+//         format_bytes(g_current_allocated).c_str());
+
+//     return CUDA_SUCCESS;
+// }
+
 CUresult CUDAAPI cuMemAlloc(CUdeviceptr* dptr, size_t bytesize) {
     ScopedTimer t_hook(API_CU_MEM_ALLOC_HOOK); 
     if (userfault_fd == -1) {
         printf("Initializing shared memory...\n");
         init_shared_memory();
         printf("Shared memory initialized at %p\n", (void*)g_shared_memory);
-        
+
         printf("Initializing userfault...\n");
         init_userfault();
         printf("userfault initialized\n");
@@ -1560,11 +1606,11 @@ CUresult CUDAAPI cuMemAlloc(CUdeviceptr* dptr, size_t bytesize) {
     
     *dptr = va;
     g_current_allocated += aligned_size;
-    printf("[%s] cuMemAlloc(dptr=0x%llx, aligned_size=%s, g_current_allocated=%s)\n", 
-        current_time().c_str(), 
-        (unsigned long long)*dptr,
-        format_bytes(aligned_size).c_str(),
-        format_bytes(g_current_allocated).c_str());
+    // printf("[%s] cuMemAlloc(dptr=0x%llx, aligned_size=%s, g_current_allocated=%s)\n", 
+    //     current_time().c_str(), 
+    //     (unsigned long long)*dptr,
+    //     format_bytes(aligned_size).c_str(),
+    //     format_bytes(g_current_allocated).c_str());
 
     return CUDA_SUCCESS;
 }

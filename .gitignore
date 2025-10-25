@@ -1,9 +1,10 @@
 .vscode/
 build/
+hash-bench/
 vllm/
 init.sh
 run.sh
 cuda.h
 log*
 hook.conf
-a.cpp
+

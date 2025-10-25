@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <cstdio>
+#include <cstring>
 
 std::string current_time() {
     char buffer[64];
@@ -46,6 +47,16 @@ std::string sha256(const void* data, size_t size) {
         sprintf(buf + i * 2, "%02x", hash[i]);
     
     return std::string(buf);
+}
+
+////////////////////////////////////////////////
+// XXH64
+////////////////////////////////////////////////
+std::string fast_hash(const void* data, size_t size) {
+    XXH64_hash_t hash = XXH3_64bits(data, size);
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0') << std::setw(16) << hash;
+    return oss.str();
 }
 
 ////////////////////////////////////////////////
@@ -351,7 +362,13 @@ std::vector<std::string> gpu_fast_hash_batch(
     const int blocks = num_pages;  // 每个block处理一个页面
     const size_t shared_mem_size = threads_per_block * sizeof(uint64_t);
     
-    gpu_hash_kernel_batch<<<blocks, threads_per_block, shared_mem_size>>>(
+    // 确保使用全局stream
+    if (!g_hash_stream_initialized) {
+        cudaStreamCreate(&g_hash_stream);
+        g_hash_stream_initialized = true;
+    }
+
+    gpu_hash_kernel_batch<<<blocks, threads_per_block, shared_mem_size, g_hash_stream>>>(
         g_d_pages_pool,           
         page_size, 
         num_pages, 
@@ -364,11 +381,12 @@ std::vector<std::string> gpu_fast_hash_batch(
         throw std::runtime_error("GPU kernel execution failed");
     }
     
-    cudaDeviceSynchronize();
+    cudaStreamSynchronize(g_hash_stream);
     
     std::vector<char> h_hash_strings(required_size);
-    cudaMemcpy(h_hash_strings.data(), g_d_hash_strings_pool, required_size, 
-               cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(h_hash_strings.data(), g_d_hash_strings_pool, required_size, 
+               cudaMemcpyDeviceToHost, g_hash_stream);
+    cudaStreamSynchronize(g_hash_stream);
     
     std::vector<std::string> results;
     results.reserve(num_pages);
@@ -376,6 +394,375 @@ std::vector<std::string> gpu_fast_hash_batch(
         results.emplace_back(h_hash_strings.data() + i * 16, 16);
     }
     
+    return results;
+}
+
+////////////////////////////////////////////////
+// 优化版 batch 哈希（每页一个 block，grid-stride + 合并访问）
+////////////////////////////////////////////////
+
+// 原实现保留；此为新增优化版。
+__global__ void gpu_hash_kernel_batch_opt(
+    const unsigned long long* __restrict__ d_pages,
+    size_t page_size,
+    size_t num_pages,
+    char* __restrict__ hash_strings)
+{
+    const int page_idx = blockIdx.x;
+    if (page_idx >= num_pages) return;
+
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(d_pages[page_idx]);
+
+    const uint64_t chunk_size = 16ULL;
+    const int num_threads = blockDim.x;
+    const int chunks_per_thread = 16; // 与原版保持一致
+    const uint64_t bytes_per_batch = (uint64_t)num_threads * (uint64_t)chunks_per_thread * chunk_size;
+    const int num_batches = (int)((page_size + bytes_per_batch - 1ULL) / bytes_per_batch);
+    extern __shared__ uint64_t s_acc[]; // 动态共享内存，与原版布局一致
+    __shared__ uint64_t s_batch_results[32];  // 静态共享内存，紧随 s_acc 之后
+    if (threadIdx.x == 0) {
+        for (int i = 0; i < num_batches && i < 32; i++) {
+            s_batch_results[i] = 0ULL;
+        }
+    }
+    __syncthreads();
+
+    // 为每个批次独立计算与归约，严格复现：每批次先归约->最终混合->相加
+    for (int batch = 0; batch < num_batches; ++batch) {
+        const uint64_t batch_base = (uint64_t)batch * bytes_per_batch;
+        const uint64_t start_offset = batch_base + (uint64_t)threadIdx.x * (uint64_t)chunks_per_thread * chunk_size;
+
+        uint64_t acc = PRIME64_5;
+
+        // 与原版严格一致：每线程处理固定的16个块，顺序相同
+        for (int i = 0; i < chunks_per_thread; ++i) {
+            const uint64_t base = start_offset + (uint64_t)i * chunk_size;
+            if (base >= page_size) break;
+
+            uint64_t v1 = 0ULL, v2 = 0ULL;
+            if (base + 8ULL <= page_size) {
+                v1 = *reinterpret_cast<const uint64_t*>(data + base);
+            }
+            if (base + 16ULL <= page_size) {
+                v2 = *reinterpret_cast<const uint64_t*>(data + base + 8ULL);
+            }
+
+            if (v1 == 0ULL) v1 = 1ULL;
+            if (v2 == 0ULL) v2 = 1ULL;
+
+            uint64_t local_acc = PRIME64_5;
+            local_acc += PRIME64_1 * v1;
+            local_acc = (local_acc << 31) | (local_acc >> 33);
+            local_acc *= PRIME64_2;
+            local_acc += PRIME64_1 * v2;
+            local_acc = (local_acc << 31) | (local_acc >> 33);
+            local_acc *= PRIME64_2;
+
+            acc ^= local_acc;
+            acc = acc * PRIME64_1 + PRIME64_4;
+        }
+
+        // 批次内归约（与原版一致：共享内存 + XOR 归约）
+        s_acc[threadIdx.x] = acc;
+        __syncthreads();
+        for (int s = num_threads / 2; s > 0; s >>= 1) {
+            if (threadIdx.x < s) {
+                s_acc[threadIdx.x] ^= s_acc[threadIdx.x + s];
+            }
+            __syncthreads();
+        }
+
+        if (threadIdx.x == 0) {
+            // 对本批次的归约结果做最终混合
+            uint64_t final_acc = s_acc[0];
+            final_acc ^= final_acc >> 33;
+            final_acc *= PRIME64_2;
+            final_acc ^= final_acc >> 29;
+            final_acc *= PRIME64_3;
+            final_acc ^= final_acc >> 32;
+            // 与原实现一致：不同批次的 final_acc 写入共享数组（可能越界的原行为由上层保持一致性）
+            s_batch_results[batch] = final_acc;
+        }
+        __syncthreads();
+    }
+
+    // 写出最终结果（为所有批次混合后之和）——与原版一致：按 num_batches 遍历
+    if (threadIdx.x == 0) {
+        uint64_t final_sum = 0ULL;
+        for (int i = 0; i < num_batches; ++i) final_sum += s_batch_results[i];
+        char* hash_str = hash_strings + page_idx * 16;
+        const char hex_chars[] = "0123456789abcdef";
+        for (int i = 0; i < 16; i++) {
+            int nibble = (final_sum >> (60 - i * 4)) & 0xF;
+            hash_str[i] = hex_chars[nibble];
+        }
+    }
+}
+
+std::vector<std::string> gpu_fast_hash_batch_opt(
+    unsigned long long* h_pages,
+    size_t page_size,
+    size_t num_pages)
+{
+    // 复用/初始化页面地址池
+    const size_t required_pages_size = num_pages * sizeof(unsigned long long);
+    if (!g_d_pages_pool_initialized) {
+        cudaMalloc(&g_d_pages_pool, required_pages_size > 0 ? required_pages_size : sizeof(unsigned long long));
+        g_d_pages_pool_size = required_pages_size > 0 ? required_pages_size : sizeof(unsigned long long);
+        g_d_pages_pool_initialized = true;
+    }
+    if (required_pages_size > g_d_pages_pool_size) {
+        cudaFree(g_d_pages_pool);
+        cudaMalloc(&g_d_pages_pool, required_pages_size);
+        g_d_pages_pool_size = required_pages_size;
+    }
+
+    if (required_pages_size) {
+        cudaMemcpy(g_d_pages_pool, h_pages, required_pages_size, cudaMemcpyHostToDevice);
+    }
+
+    // 复用/初始化哈希字符串池
+    const size_t required_size = num_pages * 16;
+    if (!g_hash_strings_pool_initialized) {
+        cudaMalloc(&g_d_hash_strings_pool, required_size > 0 ? required_size : 16);
+        g_hash_strings_pool_size = required_size > 0 ? required_size : 16;
+        g_hash_strings_pool_initialized = true;
+    }
+    if (required_size > g_hash_strings_pool_size) {
+        cudaFree(g_d_hash_strings_pool);
+        cudaMalloc(&g_d_hash_strings_pool, required_size);
+        g_hash_strings_pool_size = required_size;
+    }
+
+    if (!g_hash_stream_initialized) {
+        cudaStreamCreate(&g_hash_stream);
+        g_hash_stream_initialized = true;
+    }
+
+    const int threads_per_block = 256;
+    const int blocks = static_cast<int>(num_pages);
+
+    const size_t shared_mem_size = threads_per_block * sizeof(uint64_t);
+    gpu_hash_kernel_batch_opt<<<blocks, threads_per_block, shared_mem_size, g_hash_stream>>>(
+        g_d_pages_pool,
+        page_size,
+        num_pages,
+        g_d_hash_strings_pool
+    );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "gpu_hash_kernel_batch_opt launch failed: %s\n", cudaGetErrorString(err));
+        throw std::runtime_error("gpu_hash_kernel_batch_opt failed");
+    }
+
+    cudaStreamSynchronize(g_hash_stream);
+
+    std::vector<char> h_hash_strings(required_size);
+    if (required_size) {
+        cudaMemcpyAsync(h_hash_strings.data(), g_d_hash_strings_pool, required_size, cudaMemcpyDeviceToHost, g_hash_stream);
+    }
+    cudaStreamSynchronize(g_hash_stream);
+
+    std::vector<std::string> results;
+    results.reserve(num_pages);
+    for (size_t i = 0; i < num_pages; i++) {
+        results.emplace_back(h_hash_strings.data() + i * 16, 16);
+    }
+    return results;
+}
+
+////////////////////////////////////////////////
+// 优化版 batch 哈希 v2（共享内存分块预取 + 原序计算）
+////////////////////////////////////////////////
+
+__global__ void gpu_hash_kernel_batch_opt2(
+    const unsigned long long* __restrict__ d_pages,
+    size_t page_size,
+    size_t num_pages,
+    char* __restrict__ hash_strings)
+{
+    const int page_idx = blockIdx.x;
+    if (page_idx >= num_pages) return;
+
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(d_pages[page_idx]);
+
+    const uint64_t chunk_size = 16ULL;
+    const int num_threads = blockDim.x;
+    const int chunks_per_thread = 16; // 与原版保持一致
+    const uint64_t bytes_per_batch = (uint64_t)num_threads * (uint64_t)chunks_per_thread * chunk_size; // 64KB @256
+    const int num_batches = (int)((page_size + bytes_per_batch - 1ULL) / bytes_per_batch);
+
+    // 动态共享内存布局：tile 缓冲 + s_acc
+    extern __shared__ unsigned char s_mem[];
+    // 选择 16KB tile，避免 48KB 上限（必要时可调大为 32KB/48KB）
+    const uint64_t kTileBytes = 16ULL * 1024ULL;
+    unsigned char* s_tile = s_mem;
+    uint64_t* s_acc = reinterpret_cast<uint64_t*>(s_mem + kTileBytes);
+
+    __shared__ uint64_t s_batch_results[32];
+    if (threadIdx.x == 0) {
+        for (int i = 0; i < num_batches && i < 32; i++) s_batch_results[i] = 0ULL;
+    }
+    __syncthreads();
+
+    for (int batch = 0; batch < num_batches; ++batch) {
+        const uint64_t batch_base = (uint64_t)batch * bytes_per_batch;
+        const uint64_t batch_end = min(batch_base + bytes_per_batch, (uint64_t)page_size);
+
+        uint64_t acc = PRIME64_5;
+
+        // 分 tile 预取到共享内存，每个 tile 最大 16KB，保证全局读合并
+        for (uint64_t tile_base = batch_base; tile_base < batch_end; tile_base += kTileBytes) {
+            const uint64_t tile_end = min(tile_base + kTileBytes, batch_end);
+            const uint64_t tile_bytes = tile_end - tile_base;
+            const uint64_t tile_chunks = (tile_bytes + chunk_size - 1ULL) / chunk_size; // 以 16B 为单位
+
+            // 协作加载 tile 到共享内存（16B 对齐单元）
+            for (uint64_t tchunk = threadIdx.x; tchunk < tile_chunks; tchunk += blockDim.x) {
+                const uint64_t g_base = tile_base + tchunk * chunk_size;
+                unsigned long long vv[2] = {0ULL, 0ULL};
+                if (g_base + 16ULL <= page_size) {
+                    memcpy(&vv[0], data + g_base, 16);
+                } else {
+                    if (g_base + 8ULL <= page_size) memcpy(&vv[0], data + g_base, 8);
+                    if (g_base + 16ULL <= page_size) memcpy(&vv[1], data + g_base + 8ULL, 8);
+                }
+                // 写入共享 tile（连续 16B）
+                const uint64_t soff = tchunk * chunk_size;
+                memcpy(s_tile + soff, &vv[0], 16);
+            }
+            __syncthreads();
+
+            // 严格原序：每个线程处理其 16 个块，若落在当前 tile 则立即计算
+            const uint64_t thread_base = batch_base + (uint64_t)threadIdx.x * (uint64_t)chunks_per_thread * chunk_size;
+            for (int i = 0; i < chunks_per_thread; ++i) {
+                const uint64_t base = thread_base + (uint64_t)i * chunk_size;
+                if (base >= batch_end) break;
+                if (!(base >= tile_base && base + 16ULL <= tile_end)) continue; // 不在本 tile 内，等下一个 tile
+
+                const uint64_t soff = (base - tile_base);
+                unsigned long long vv[2];
+                memcpy(&vv[0], s_tile + soff, 16);
+                uint64_t v1 = vv[0];
+                uint64_t v2 = vv[1];
+                if (v1 == 0ULL) v1 = 1ULL;
+                if (v2 == 0ULL) v2 = 1ULL;
+
+                uint64_t local_acc = PRIME64_5;
+                local_acc += PRIME64_1 * v1;
+                local_acc = (local_acc << 31) | (local_acc >> 33);
+                local_acc *= PRIME64_2;
+                local_acc += PRIME64_1 * v2;
+                local_acc = (local_acc << 31) | (local_acc >> 33);
+                local_acc *= PRIME64_2;
+
+                acc ^= local_acc;
+                acc = acc * PRIME64_1 + PRIME64_4;
+            }
+            __syncthreads();
+        }
+
+        // 批次内归约（与原版一致）
+        s_acc[threadIdx.x] = acc;
+        __syncthreads();
+        for (int s = num_threads / 2; s > 0; s >>= 1) {
+            if (threadIdx.x < s) s_acc[threadIdx.x] ^= s_acc[threadIdx.x + s];
+            __syncthreads();
+        }
+
+        if (threadIdx.x == 0) {
+            uint64_t final_acc = s_acc[0];
+            final_acc ^= final_acc >> 33;
+            final_acc *= PRIME64_2;
+            final_acc ^= final_acc >> 29;
+            final_acc *= PRIME64_3;
+            final_acc ^= final_acc >> 32;
+            s_batch_results[batch] = final_acc;
+        }
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0) {
+        uint64_t final_sum = 0ULL;
+        for (int i = 0; i < num_batches; ++i) final_sum += s_batch_results[i];
+        char* hash_str = hash_strings + page_idx * 16;
+        const char hex_chars[] = "0123456789abcdef";
+        for (int i = 0; i < 16; i++) {
+            int nibble = (final_sum >> (60 - i * 4)) & 0xF;
+            hash_str[i] = hex_chars[nibble];
+        }
+    }
+}
+
+std::vector<std::string> gpu_fast_hash_batch_opt2(
+    unsigned long long* h_pages,
+    size_t page_size,
+    size_t num_pages)
+{
+    const size_t required_pages_size = num_pages * sizeof(unsigned long long);
+    if (!g_d_pages_pool_initialized) {
+        cudaMalloc(&g_d_pages_pool, required_pages_size > 0 ? required_pages_size : sizeof(unsigned long long));
+        g_d_pages_pool_size = required_pages_size > 0 ? required_pages_size : sizeof(unsigned long long);
+        g_d_pages_pool_initialized = true;
+    }
+    if (required_pages_size > g_d_pages_pool_size) {
+        cudaFree(g_d_pages_pool);
+        cudaMalloc(&g_d_pages_pool, required_pages_size);
+        g_d_pages_pool_size = required_pages_size;
+    }
+    if (required_pages_size) {
+        cudaMemcpy(g_d_pages_pool, h_pages, required_pages_size, cudaMemcpyHostToDevice);
+    }
+
+    const size_t required_size = num_pages * 16;
+    if (!g_hash_strings_pool_initialized) {
+        cudaMalloc(&g_d_hash_strings_pool, required_size > 0 ? required_size : 16);
+        g_hash_strings_pool_size = required_size > 0 ? required_size : 16;
+        g_hash_strings_pool_initialized = true;
+    }
+    if (required_size > g_hash_strings_pool_size) {
+        cudaFree(g_d_hash_strings_pool);
+        cudaMalloc(&g_d_hash_strings_pool, required_size);
+        g_hash_strings_pool_size = required_size;
+    }
+
+    if (!g_hash_stream_initialized) {
+        cudaStreamCreate(&g_hash_stream);
+        g_hash_stream_initialized = true;
+    }
+
+    const int threads_per_block = 256;
+    const int blocks = static_cast<int>(num_pages);
+    const size_t kTileBytes = 16 * 1024; // 必须与 kernel 中保持一致
+    const size_t shared_mem_size = kTileBytes + threads_per_block * sizeof(uint64_t);
+
+    gpu_hash_kernel_batch_opt2<<<blocks, threads_per_block, shared_mem_size, g_hash_stream>>>(
+        g_d_pages_pool,
+        page_size,
+        num_pages,
+        g_d_hash_strings_pool
+    );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "gpu_hash_kernel_batch_opt2 launch failed: %s\n", cudaGetErrorString(err));
+        throw std::runtime_error("gpu_hash_kernel_batch_opt2 failed");
+    }
+
+    cudaStreamSynchronize(g_hash_stream);
+
+    std::vector<char> h_hash_strings(required_size);
+    if (required_size) {
+        cudaMemcpyAsync(h_hash_strings.data(), g_d_hash_strings_pool, required_size, cudaMemcpyDeviceToHost, g_hash_stream);
+    }
+    cudaStreamSynchronize(g_hash_stream);
+
+    std::vector<std::string> results;
+    results.reserve(num_pages);
+    for (size_t i = 0; i < num_pages; i++) {
+        results.emplace_back(h_hash_strings.data() + i * 16, 16);
+    }
     return results;
 }
 
@@ -434,20 +821,27 @@ uint64_t gpu_ultra_fast_hash_single(unsigned long long d_data, size_t size) {
         g_memory_initialized = true;
     }
     
+    // 确保使用全局stream
+    if (!g_hash_stream_initialized) {
+        cudaStreamCreate(&g_hash_stream);
+        g_hash_stream_initialized = true;
+    }
+    
     const int threads_per_block = 256;
     const size_t bytes_per_block = threads_per_block * 16 * 8;  // 每个block处理256*128=32,768字节
     const int blocks = (size + bytes_per_block - 1) / bytes_per_block;
 
-    gpu_ultra_fast_hash_kernel<<<blocks, threads_per_block>>>(
+    gpu_ultra_fast_hash_kernel<<<blocks, threads_per_block, 0, g_hash_stream>>>(
         reinterpret_cast<const uint8_t*>(d_data), 
         size, 
         g_d_result
     );
     
-    cudaDeviceSynchronize();
+    cudaStreamSynchronize(g_hash_stream);
     
     uint64_t h_result = 0;
-    cudaMemcpy(&h_result, g_d_result, sizeof(uint64_t), cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(&h_result, g_d_result, sizeof(uint64_t), cudaMemcpyDeviceToHost, g_hash_stream);
+    cudaStreamSynchronize(g_hash_stream);
     
     return h_result;
 }
@@ -626,6 +1020,8 @@ bool parse_config_file(const std::string& filename, HookConfig& config) {
             config.max_dedupe_pages = parse_int(value, 1024);
         } else if (key == "max_shared_refs") {
             config.max_shared_refs = parse_int(value, 32);
+        } else if (key == "max_scan_pages") {
+            config.max_scan_pages = parse_int(value, 0);
         } else if (key == "hook_path") {
             config.hook_path = strdup(value.c_str());
         } else if (key == "orig_path") {
@@ -658,4 +1054,134 @@ void print_config(HookConfig g_hook_config) {
     printf("Max Dedupe Pages: %d\n", g_hook_config.max_dedupe_pages);
     printf("Max Shared Refs: %d\n", g_hook_config.max_shared_refs);
     printf("================================\n");
+}
+
+////////////////////////////////////////////////
+// 优化版 XXH64 gpu（grid-stride + 合并访问）
+////////////////////////////////////////////////
+
+// 原始实现保留不动；此为新增优化版本
+__global__ void gpu_hash_kernel_single_opt(
+    const uint8_t* __restrict__ data,
+    size_t size,
+    uint64_t* result)
+{
+    const uint64_t chunk_size = 16ULL;
+    const uint64_t num_chunks = (size + chunk_size - 1ULL) / chunk_size;
+
+    uint64_t acc = PRIME64_5;
+
+    // grid-stride 循环，确保 warp 内相邻线程访问相邻块，提升合并度
+    for (uint64_t chunk_idx = blockIdx.x * blockDim.x + threadIdx.x;
+         chunk_idx < num_chunks;
+         chunk_idx += (uint64_t)gridDim.x * blockDim.x)
+    {
+        const uint64_t base = chunk_idx * chunk_size;
+
+        uint64_t v1 = 0ULL, v2 = 0ULL;
+
+        if (base + 16ULL <= size) {
+            // 使用 memcpy 规避潜在未对齐带来的性能/可移植性问题
+            unsigned long long vv[2];
+            memcpy(&vv[0], data + base, 16);
+            v1 = vv[0];
+            v2 = vv[1];
+        } else {
+            if (base + 8ULL <= size) memcpy(&v1, data + base, 8);
+            if (base + 16ULL <= size) memcpy(&v2, data + base + 8ULL, 8);
+        }
+
+        if (v1 == 0ULL) v1 = 1ULL;
+        if (v2 == 0ULL) v2 = 1ULL;
+
+        uint64_t local_acc = PRIME64_5;
+        local_acc += PRIME64_1 * v1;
+        local_acc = (local_acc << 31) | (local_acc >> 33);
+        local_acc *= PRIME64_2;
+        local_acc += PRIME64_1 * v2;
+        local_acc = (local_acc << 31) | (local_acc >> 33);
+        local_acc *= PRIME64_2;
+
+        acc ^= local_acc;
+        acc = acc * PRIME64_1 + PRIME64_4;
+    }
+
+    // block 内归约（XOR）。先做 warp 内归约，再由每个 warp 的 lane0 写入共享内存
+    unsigned mask = 0xffffffffu;
+    // warp 归约
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        acc ^= __shfl_xor_sync(mask, acc, offset);
+    }
+
+    __shared__ uint64_t warp_acc[32];
+    const int lane_id = threadIdx.x & 31;
+    const int warp_id = threadIdx.x >> 5; // /32
+    if (lane_id == 0) {
+        warp_acc[warp_id] = acc;
+    }
+    __syncthreads();
+
+    // 由 warp0 再次归约所有 warp 的结果
+    uint64_t block_acc = 0ULL;
+    if (warp_id == 0) {
+        block_acc = (lane_id < (blockDim.x + 31) / 32) ? warp_acc[lane_id] : 0ULL;
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            block_acc ^= __shfl_xor_sync(mask, block_acc, offset);
+        }
+        if (lane_id == 0) {
+            uint64_t final_acc = block_acc;
+            final_acc ^= final_acc >> 33;
+            final_acc *= PRIME64_2;
+            final_acc ^= final_acc >> 29;
+            final_acc *= PRIME64_3;
+            final_acc ^= final_acc >> 32;
+            atomicAdd(reinterpret_cast<unsigned long long*>(result), final_acc);
+        }
+    }
+}
+
+// 优化版 host 包装：保留与原版相同的全局资源与返回格式
+std::string gpu_fast_hash_single_opt(unsigned long long d_data, size_t size) {
+    if (!g_memory_initialized_xxh3) {
+        cudaMalloc(reinterpret_cast<void**>(&g_d_result_xxh3), sizeof(uint64_t));
+        g_memory_initialized_xxh3 = true;
+    }
+
+    if (!g_hash_stream_initialized) {
+        cudaStreamCreate(&g_hash_stream);
+        g_hash_stream_initialized = true;
+    }
+
+    cudaMemsetAsync(g_d_result_xxh3, 0, sizeof(uint64_t), g_hash_stream);
+
+    const int threads_per_block = 256;
+    const uint64_t chunk_size = 16ULL;
+    const uint64_t num_chunks = (size + chunk_size - 1ULL) / chunk_size;
+
+    // grid 大小基于 chunks，过大输入时可自动扩展；也可按需做上限
+    uint64_t blocks64 = (num_chunks + threads_per_block - 1ULL) / threads_per_block;
+    int blocks = (blocks64 > 0x7fffffffULL) ? 0x7fffffff : static_cast<int>(blocks64);
+    if (blocks <= 0) blocks = 1;
+
+    gpu_hash_kernel_single_opt<<<blocks, threads_per_block, 0, g_hash_stream>>>(
+        reinterpret_cast<const uint8_t*>(d_data),
+        size,
+        g_d_result_xxh3
+    );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "gpu_hash_kernel_single_opt launch failed: %s\n", cudaGetErrorString(err));
+        throw std::runtime_error("gpu_hash_kernel_single_opt failed");
+    }
+
+    cudaStreamSynchronize(g_hash_stream);
+
+    uint64_t h_result = 0;
+    cudaMemcpyAsync(&h_result, g_d_result_xxh3, sizeof(uint64_t), cudaMemcpyDeviceToHost, g_hash_stream);
+    cudaStreamSynchronize(g_hash_stream);
+
+    char hex_str[17];
+    snprintf(hex_str, sizeof(hex_str), "%016lx", h_result);
+    return std::string(hex_str, 16);
 }

@@ -14,12 +14,22 @@
 #include "tools.h"
 #include "ipc.h"
 
-const int MAX_DEDUPE_PAGES = 40960;
+typedef struct update_pagefault_args {
+    unsigned long page_addr;  
+    int fault_type;   
+    int num_pages;   
+} update_pagefault_args;
+
+const int MAX_DEDUPE_PAGES = 20480;
 #define CMD_START_USERFAULT _IOW('L', 1, unsigned long)
 #define CMD_UPDATE_PAGEFAULT _IOW('L', 4, unsigned long)
-#define MAX_SHARED_REFS 64
+#define MAX_SHARED_REFS 16
 #define MAX_MEMCPY_LIMIT 3
 #define DEDUP_DEVICE 0
+
+#define UVM_FAULT_TYPE_INVALID_PDE 0
+#define UVM_FAULT_TYPE_WRITE 3
+
 
 typedef int ShareableHandle;
 struct SharedPageInfo {
@@ -92,7 +102,7 @@ pid_t g_dedup_pid = -1;
 std::mutex g_mutex; 
 size_t g_current_allocated = 0;
 size_t g_saved_memory = 0; 
-size_t g_saved_memory_print_threshold = 500 * 1024 * 1024;
+size_t g_saved_memory_print_threshold = 512 * 1024 * 1024;
 size_t g_page_size = 2 * 1024 * 1024; 
 size_t g_cuMemCpy_size = 0;
 size_t pages_deduped = 0;
@@ -124,7 +134,8 @@ HookConfig g_hook_config = {
     .page_size = 2097152,
     .shared_memory_name = "/cuda_dedup_shared",
     .max_dedupe_pages = 20480,
-    .max_shared_refs = 32
+    .max_shared_refs = 32,
+    .max_scan_pages = 0
 };
 
 void init_shared_memory();

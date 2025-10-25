@@ -78,6 +78,7 @@ enum ApiId {
     API_HASH_SHA256_GPU,
     API_HASH_XXH64,
     API_HASH_XXH64_GPU,
+    API_HASH_XXH64_GPU_BATCH,
     API_ULTRA_FAST_HASH_GPU,
     API_BLOOM_FILTER_CHECK,
     API_BACKGROUND_SCAN,
@@ -139,6 +140,7 @@ static const char* g_api_names[API_COUNT] = {
     "hash_sha256_gpu",
     "hash_xxh64",
     "hash_xxh64_gpu",
+    "hash_xxh64_gpu_batch",
     "ultra_fast_hash_gpu",
     "bloom_filter_check",
     "background_scan",
@@ -162,6 +164,7 @@ typedef struct {
     char * shared_memory_name;      // 共享内存名称
     int max_dedupe_pages;           // 最大去重页面数
     int max_shared_refs;            // 最大共享引用数
+    int max_scan_pages;              // 每次扫描的显存页数量上限
     char* hook_path;
     char* orig_path;
 } HookConfig;
@@ -174,6 +177,8 @@ std::string sha256(const void* data, size_t size);
 std::string fast_hash(const void* data, size_t size);
 std::string gpu_fast_hash_single(unsigned long long d_data, size_t size);
 std::vector<std::string> gpu_fast_hash_batch(unsigned long long* pages, size_t page_size, size_t num_pages);
+std::vector<std::string> gpu_fast_hash_batch_opt(unsigned long long* pages, size_t page_size, size_t num_pages);
+std::vector<std::string> gpu_fast_hash_batch_opt2(unsigned long long* pages, size_t page_size, size_t num_pages);
 bool parse_config_file(const std::string& filename, HookConfig& config);
 void print_config(HookConfig g_hook_config);
 
