@@ -7,4 +7,5 @@ run.sh
 cuda.h
 log*
 hook.conf
-
+gKSM/
+hybrid/

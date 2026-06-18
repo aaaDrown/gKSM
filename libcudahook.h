@@ -20,13 +20,11 @@ typedef struct update_pagefault_args {
     int num_pages;   
 } update_pagefault_args;
 
-const int MAX_DEDUPE_PAGES = 20480;
+const int MAX_DEDUPE_PAGES = 120000;
 #define CMD_START_USERFAULT _IOW('L', 1, unsigned long)
 #define CMD_UPDATE_PAGEFAULT _IOW('L', 4, unsigned long)
 #define MAX_SHARED_REFS 16
 #define MAX_MEMCPY_LIMIT 3
-#define DEDUP_DEVICE 0
-
 #define UVM_FAULT_TYPE_INVALID_PDE 0
 #define UVM_FAULT_TYPE_WRITE 3
 
@@ -38,7 +36,8 @@ struct SharedPageInfo {
     CUdeviceptr owner_va;
     char sock_path[108];         
     bool valid;                   
-    int device_id;   
+    int device_id;
+    int dedup_domain_id;
     int ref_count;      
     int ref_pids[MAX_SHARED_REFS];        
     CUdeviceptr ref_vas[MAX_SHARED_REFS];            
@@ -48,6 +47,8 @@ struct LocalPageInfo {
     CUdeviceptr va;                
     CUmemGenericAllocationHandle handle;          
     char hash[HASH_SIZE];     
+    int device_id = -1;
+    int dedup_domain_id = -1;
     bool pagefault_flag = false; 
     
     // background scan   
@@ -64,6 +65,8 @@ struct CandidatePageInfo {
     char hash[HASH_SIZE];
     pid_t pid;
     CUdeviceptr va;
+    int device_id;
+    int dedup_domain_id;
     bool valid;
     int unchanged_scans; 
 };
@@ -91,6 +94,8 @@ typedef struct {
     std::vector<LocalPageInfo> pages;
     CUdeviceptr va;
     size_t aligned_size;
+    int device_id = -1;
+    int dedup_domain_id = -1;
 } VMMAllocInfo;
 
 std::map<CUdeviceptr, LocalPageInfo>* g_page_map = nullptr;

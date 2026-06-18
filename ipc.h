@@ -30,6 +30,8 @@ struct IpcRequest {
     pid_t src_pid;
     pid_t dst_pid;
     char hash[HASH_SIZE];
+    int device_id;
+    int dedup_domain_id;
 };
 
 // IPC响应结构
@@ -39,11 +41,19 @@ struct IpcResponse {
 
 
 
+struct SharedFdRequest {
+    char hash[HASH_SIZE];
+    int device_id;
+    int dedup_domain_id;
+};
+
 // 定义重删请求和响应结构
 struct DedupRequest {
     unsigned long long va;
     char hash[HASH_SIZE];
     pid_t src_pid; 
+    int device_id;
+    int dedup_domain_id;
 };
 
 struct DedupResponse {
@@ -55,6 +65,6 @@ void ipc_cleanup();
 int ipc_recv_fd(int sock);
 bool ipc_send_fd(int sock, int fd);
 std::string ipc_get_current_sock_path();
-int ipc_get_shared_fd(pid_t owner_pid, const char* sock_path, const char* hash);
+int ipc_get_shared_fd(pid_t owner_pid, const char* sock_path, const char* hash, int device_id, int dedup_domain_id);
 bool ipc_transfer_ownership(pid_t new_owner_pid, const IpcRequest* req, int shareable_fd);
-bool ipc_send_dedup_request(pid_t target_pid, unsigned long long va, const char* hash);
+bool ipc_send_dedup_request(pid_t target_pid, unsigned long long va, const char* hash, int device_id, int dedup_domain_id);

@@ -85,7 +85,7 @@ void ipc_cleanup() {
 }
 
 // 从指定进程获取共享页面的文件描述符
-int ipc_get_shared_fd(pid_t owner_pid, const char* sock_path, const char* hash) {
+int ipc_get_shared_fd(pid_t owner_pid, const char* sock_path, const char* hash, int device_id, int dedup_domain_id) {
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) {
         perror("socket creation failed");
@@ -109,8 +109,12 @@ int ipc_get_shared_fd(pid_t owner_pid, const char* sock_path, const char* hash) 
         close(sock);
         return -1;
     }
-    if (write(sock, hash, HASH_SIZE) != HASH_SIZE) {
-        perror("write hash failed");
+    SharedFdRequest request_data = {};
+    strncpy(request_data.hash, hash, HASH_SIZE);
+    request_data.device_id = device_id;
+    request_data.dedup_domain_id = dedup_domain_id;
+    if (write(sock, &request_data, sizeof(request_data)) != sizeof(request_data)) {
+        perror("write shared-fd request failed");
         close(sock);
         return -1;
     }
@@ -178,7 +182,7 @@ bool ipc_transfer_ownership(pid_t new_owner_pid, const IpcRequest* req, int shar
     return resp.success;
 }
 
-bool ipc_send_dedup_request(pid_t target_pid, unsigned long long va, const char* hash) {
+bool ipc_send_dedup_request(pid_t target_pid, unsigned long long va, const char* hash, int device_id, int dedup_domain_id) {
     // printf("gsh in ipc_send_dedup_request, va=%lx, hash=%s\n", va, hash);
     // 获取目标进程的socket路径
     char sock_path[108];
@@ -207,6 +211,8 @@ bool ipc_send_dedup_request(pid_t target_pid, unsigned long long va, const char*
     request.va = va;
     strncpy(request.hash, hash, HASH_SIZE);
     request.src_pid = getpid();
+    request.device_id = device_id;
+    request.dedup_domain_id = dedup_domain_id;
 
     char request_type = 'D';
     if (write(sock, &request_type, 1) != 1) {
