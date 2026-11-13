@@ -175,6 +175,7 @@ std::string current_time();
 std::string format_bytes(size_t bytes);
 std::string sha256(const void* data, size_t size);
 std::string fast_hash(const void* data, size_t size);
+bool gpu_pages_equal(unsigned long long a, unsigned long long b, size_t size);
 std::string gpu_fast_hash_single(unsigned long long d_data, size_t size);
 std::vector<std::string> gpu_fast_hash_batch(unsigned long long* pages, size_t page_size, size_t num_pages);
 std::vector<std::string> gpu_fast_hash_batch_opt(unsigned long long* pages, size_t page_size, size_t num_pages);

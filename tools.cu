@@ -1,8 +1,55 @@
 #include "tools.h"
+#include "cuda.h"
+#include <map>
 #include <vector>
 #include <string>
 #include <cstdio>
 #include <cstring>
+
+__global__ void compare_pages_kernel(const uint4* a, const uint4* b, size_t size, unsigned int* result) {
+    size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = gridDim.x * blockDim.x;
+    bool different = false;
+    for (size_t i = index; i < size / sizeof(uint4); i += stride) {
+        uint4 x = a[i], y = b[i];
+        different |= x.x != y.x || x.y != y.y || x.z != y.z || x.w != y.w;
+    }
+    for (size_t i = size / sizeof(uint4) * sizeof(uint4) + index; i < size; i += stride)
+        different |= reinterpret_cast<const uint8_t*>(a)[i] != reinterpret_cast<const uint8_t*>(b)[i];
+    if (__syncthreads_or(different) && threadIdx.x == 0)
+        atomicExch(result, 1u);
+}
+
+bool gpu_pages_equal(unsigned long long a, unsigned long long b, size_t size) {
+    struct Buffer {
+        CUcontext context = nullptr;
+        unsigned long long id = 0;
+        unsigned int* result = nullptr;
+        ~Buffer() {
+            CUcontext previous;
+            unsigned long long current_id;
+            if (result && cuCtxGetId(context, &current_id) == CUDA_SUCCESS && current_id == id && cuCtxPushCurrent(context) == CUDA_SUCCESS) {
+                cudaFree(result);
+                cuCtxPopCurrent(&previous);
+            }
+        }
+    };
+    CUcontext context;
+    unsigned long long id;
+    if (cuCtxGetCurrent(&context) != CUDA_SUCCESS || cuCtxGetId(context, &id) != CUDA_SUCCESS) return false;
+    thread_local std::map<unsigned long long, Buffer> buffers;
+    auto& buffer = buffers[id];
+    buffer.context = context;
+    buffer.id = id;
+    if (!buffer.result && cudaMalloc(&buffer.result, sizeof(unsigned int)) != cudaSuccess) return false;
+    cudaStream_t stream = cudaStreamPerThread;
+    if (cudaMemsetAsync(buffer.result, 0, sizeof(unsigned int), stream) != cudaSuccess) return false;
+    compare_pages_kernel<<<128, 256, 0, stream>>>(reinterpret_cast<const uint4*>(a), reinterpret_cast<const uint4*>(b), size, buffer.result);
+    if (cudaGetLastError() != cudaSuccess) return false;
+    unsigned int different;
+    if (cudaMemcpyAsync(&different, buffer.result, sizeof(different), cudaMemcpyDeviceToHost, stream) != cudaSuccess) return false;
+    return cudaStreamSynchronize(stream) == cudaSuccess && different == 0;
+}
 
 std::string current_time() {
     char buffer[64];

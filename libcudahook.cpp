@@ -1242,7 +1242,8 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
             return false;
         }
         CUmemGenericAllocationHandle imported_handle;
-        if (g_dedup_pid == shared_page->owner_pid) {
+        bool remote = g_dedup_pid != shared_page->owner_pid;
+        if (!remote) {
             auto page_it = g_page_map->find(shared_page->owner_va);
             LocalPageInfo& page = page_it->second;
             imported_handle = page.handle;
@@ -1281,6 +1282,26 @@ bool try_deduplicate_page(CUdeviceptr va, const void * data, size_t size, const 
             }
         }
         
+        bool equal = false;
+        if (!remote) {
+            equal = gpu_pages_equal(va, shared_page->owner_va, size);
+        } else {
+            CUdeviceptr alias = 0;
+            if (orig_cuMemAddressReserve(&alias, size, 0, 0, 0) == CUDA_SUCCESS) {
+                if (orig_cuMemMap(alias, size, 0, imported_handle, 0) == CUDA_SUCCESS) {
+                    CUmemAccessDesc access = {{CU_MEM_LOCATION_TYPE_DEVICE, cur_page.device_id}, CU_MEM_ACCESS_FLAGS_PROT_READ};
+                    if (orig_cuMemSetAccess(alias, size, &access, 1) == CUDA_SUCCESS)
+                        equal = gpu_pages_equal(va, alias, size);
+                    if (orig_cuMemUnmap(alias, size) != CUDA_SUCCESS) equal = false;
+                }
+                if (orig_cuMemAddressFree(alias, size) != CUDA_SUCCESS) equal = false;
+            }
+        }
+        if (!equal) {
+            if (remote) orig_cuMemRelease(imported_handle);
+            return false;
+        }
+
         {
             //ScopedTimer t_hook(API_CU_MEM_UNMAP_ORIG); 
             if (orig_cuMemUnmap(va, size) != CUDA_SUCCESS) {
