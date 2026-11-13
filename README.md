@@ -31,7 +31,6 @@ static void init_hook() {
 - **布隆过滤 + 候选列表**：对快速哈希结果做预过滤，减少重复计算；候选页列表用于跨进程、跨分配批次匹配。
 - **跨进程共享/去重**：通过 `cuMemExportToShareableHandle` + UNIX FD 传递，将去重页映射到其他进程；支持所有权转移与去重请求回调。
 - **用户态缺页处理（可选）**：配置 `userfault_fd_path` 时，用户态处理缺页并按需映射/复制。
-- **统计输出**：周期性打印各 Hook API 的调用与耗时统计，便于评估去重开销和收益。
 
 ## 构建与安装
 1. 先备份并设置原生 CUDA 库（脚本会在 `/usr/lib/x86_64-linux-gnu` 下复制为 `libcuda-native.so`）。
@@ -43,20 +42,6 @@ static void init_hook() {
 3. 确认生成 `build/libcuda.so.1`，并确保 `LD_LIBRARY_PATH=/root/dedup/build` 在目标进程可见。
 4. 按需更新 `hook.conf`，删除旧的共享内存文件：`rm /dev/shm/cuda_dedup_shared`。
 
-## 运行示例
-- 基准脚本：`run.sh` 会先清理共享内存，再启动两轮 `pytorch-benchmarks` 以模拟多实例去重场景。
-- 环境准备示例：
-  ```bash
-  # 激活环境与驱动模块（参考 init.sh）
-  conda activate dedup
-  export LD_LIBRARY_PATH=/root/dedup/build
-  rm /dev/shm/cuda_dedup_shared
-
-  # 运行自己的 CUDA/VLLM 进程，确保优先加载 Hook 库
-  python your_job.py
-  ```
-- VLLM/ShareGPT 压测可参考 `vllm/server.sh`、`vllm/run_sharegpt_request_rates.sh`。
-
 ## 关键能力与特性
 - 跨进程显存去重：利用 CUDA VMM 共享句柄与 FD 传递，实现页级去重与所有权转移。
 - GPU 加速哈希：批量 XXH64/自定义超快哈希，减少 CPU 参与和 PCIe 往返。
@@ -64,14 +49,4 @@ static void init_hook() {
 - 布隆过滤：预筛重复页，降低哈希/对比成本。
 - 统计与可观测性：Hook API 调用次数、耗时汇总，便于评估收益与瓶颈。
 
-## 部署注意事项
-- 需匹配驱动版本（570）与 CUDA 版本（12.4），并在 A100 环境验证。
-- 进程需优先加载替换后的 `libcuda.so.1`，否则不会触发 Hook。
-- 去重粒度与页面对齐：确保分配对齐到配置的 `page_size`，避免误判。
-- 若开启用户态缺页处理，需要提供可访问的 `userfault_fd_path` 设备。
-- 多实例场景请确保 `/tmp/cuda_dedup_<pid>.sock` 可创建且可互访。
-
-## 后续可扩展方向
-- 引入动态策略（基于页修改频率/吞吐自适应调节扫描间隔）。
-- 增强安全与隔离（租户隔离场景下的白名单/ACL）。
 
